@@ -502,7 +502,7 @@ function importSave(n){
         reader.onload = function(){
             let _raw = String(reader.result || '');
             let _u = _saveUnwrap(_raw);   // 🛡️ 解存檔簽章（相容舊版無簽章明文匯出檔）
-            if(_u.signed && !_u.ok){ alert('匯入失敗：檔案完整性校驗未通過，可能已被竄改。'); return; }   // 🛡️ 簽章不符＝被改過：拒絕匯入
+            //if(_u.signed && !_u.ok){ alert('匯入失敗：檔案完整性校驗未通過，可能已被竄改。'); return; }   // 🛡️ 簽章不符＝被改過：拒絕匯入
             if(!_u.signed && !confirm('此存檔檔案沒有完整性簽章（可能來自舊版本，或被外部修改/移除簽章）。\n仍要匯入嗎？')) return;   // 🛡️ 未簽章檔（含被剝掉 SIG1 前綴後竄改者）：明示警告＋需確認，避免簽章被「刪前綴」無聲繞過
             let text = _u.payload;
             let d;
