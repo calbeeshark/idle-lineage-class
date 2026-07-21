@@ -518,7 +518,7 @@
         #player-morph-sprite { position: absolute; bottom: 4px; height: 1px; z-index: 2; pointer-events: none; overflow: visible; }
         #player-morph-sprite img { position: absolute; left: 0; bottom: 0; image-rendering: crisp-edges; image-rendering: pixelated; }
         #player-morph-sprite .pm-shadow { mix-blend-mode: multiply; }
-        /* 🤝 v3.0.70 隊員戰場 sprite（隊員1~3·結構同 #player-morph-sprite·bottom/z-index 由 JS 依 aggro 權重排前後） */
+        /* 🤝 v3.0.70 隊員戰場 sprite（結構同 #player-morph-sprite·bottom/z-index 由 JS 依招募順序固定站位·v3.6.89 取消權重排位） */
         .party-sprite { position: absolute; bottom: 4px; height: 1px; z-index: 2; pointer-events: none; overflow: visible; }
         .party-sprite img { position: absolute; left: 0; bottom: 0; image-rendering: crisp-edges; image-rendering: pixelated; }
         .party-sprite .pm-shadow { mix-blend-mode: multiply; }
@@ -1686,6 +1686,27 @@ button.classic-skill-cell { cursor:pointer; }
     opacity:.72;
     filter:drop-shadow(0 0 14px rgba(235,207,130,.28)) brightness(.86);
 }
+.load-offline-badge {
+    position:absolute;
+    z-index:2;
+    left:50%;
+    top:2.2%;
+    transform:translateX(-50%);
+    pointer-events:none;
+    white-space:nowrap;
+    padding:3px 8px;
+    border:1px solid rgba(74,222,128,.72);
+    border-radius:3px;
+    background:rgba(3,18,12,.88);
+    color:#86efac;
+    box-shadow:0 2px 5px rgba(0,0,0,.82), inset 0 1px 0 rgba(255,255,255,.08);
+    text-shadow:0 1px 2px #000, 0 0 5px rgba(34,197,94,.48);
+    font-family:"Microsoft JhengHei", sans-serif;
+    font-size:14px;
+    font-weight:700;
+    line-height:1.2;
+    letter-spacing:0;
+}
 .load-slot-card.selected::after {
     display:none;
 }
@@ -2067,6 +2088,7 @@ button.classic-skill-cell { cursor:pointer; }
         box-shadow: inset 0 0 20px rgba(0,0,0,.72);
     }
     .load-slot-card img { transform: scale(1.02); }
+    .load-offline-badge { top:6px; padding:2px 6px; font-size:12px; }
     .load-slot-card[data-key="m_warrior"] img,
     .load-slot-card[data-key="f_warrior"] img { transform: scale(1.16); }
     #load-page-tabs {
@@ -2819,6 +2841,12 @@ button.classic-skill-cell { cursor:pointer; }
     color: #f4df9e;
 }
 .wandering-shout-menu .wandering-taunt-entry { color: #f3b5a9; }
+/* 🛡️ v3.6.77 世界頻道點名字時的血盟標頭（無盟不輸出這個元素→不佔位） */
+.wandering-shout-menu .wc-menu-clan {
+    padding: 5px 14px 6px; margin-bottom: 3px;
+    border-bottom: 1px solid rgba(183, 146, 62, .35);
+    color: #a5f3fc; font-size: 12px; font-weight: bold; white-space: nowrap; text-align: left;
+}
 .wandering-shout-menu .wandering-taunt-entry:hover {
     background: rgba(153, 63, 51, .24);
     color: #ffd2c8;

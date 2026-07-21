@@ -183,85 +183,147 @@ function gameLoop() {
     // 🛡️ 反盜用：非官方網域時橫幅若被移除則自動重掛（官方/本機為快取布林值判定，成本可忽略）
     if (typeof _origEnforce === 'function') _origEnforce();
     let now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-    if(_loopLast == null) _loopLast = now;
+    if (_loopLast == null) {
+        _loopLast = now;
+        _tickDebt = 0;
+        return;
+    }
     let elapsed = now - _loopLast;
     _loopLast = now;
 
-    // 遊戲未進行 / 角色死亡：不累積也不補跑（丟棄這段時間）
-    if(!state.running || player.dead) { _tickDebt = 0; return; }
-
-    if(elapsed < 0) elapsed = 0;
-    if(elapsed > MAX_CATCHUP_MS) elapsed = MAX_CATCHUP_MS; // 上限保護
-    _tickDebt += elapsed;
-
-    // 補跑排程：owed = 目前積欠的 tick 數。即時遊玩恆為 1；切分頁/背景降速回來時可能累積上千。
-    let owed = Math.floor(_tickDebt / TICK_MS);
-    if(owed <= 0) return;
-
-    if(owed === 1) {           // 正常情況：每 100ms 跑一個 tick
-        _tickDebt -= TICK_MS;
-        // 🔧 前景即時遊玩不顯示金幣（金幣不逐殺輸出，也不在即時累積）；金幣僅於背景補跑回來時由 flushAwaySummary 彙整顯示。
-        flushAwaySummary(); // 回到即時：若先前累積了補跑所得，於此統一輸出一次
-        state.inTick = true;   // 🔧 架構#2：tick 期間的擊殺只標記，結束後統一清算
-        try { tick(); } finally { state.inTick = false; settleDeadMobs(); }
-        flushTickRender();   // 🚀 重繪合併：把本 tick 內累積的 updateUI/renderMobs 統一重繪一次
+    // 🔀 v3.6.95 混合制：背景期間（分頁還開著）不跑也不清帳——時間由 js/01 的 visibilitychange 錨點
+    //    在回前景時整段記入 _tickDebt，這裡的補跑路徑再全額償還（補幀）。真正關閉網頁＝js/27 離線收益。
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if (!state.running || player.dead) {
+        _tickDebt = 0;
+        _ffAcc = null;
+        _ffErrorStreak = 0;
+        state.ff = false;
+        state.ffSmall = false;
+        state.inTick = false;
+        if (typeof takeCatchupSaveRequest === 'function') takeCatchupSaveRequest();
         return;
     }
 
-    // 需要補跑多個 tick：期間關閉逐 tick 的畫面刷新與戰鬥訊息，跑完再統一刷新一次
-    // 補跑期間 logSys 被靜音，先記錄背包與金幣，補跑後把增量「累積」起來（不立即輸出，
-    // 避免計時抖動/背景降速造成每次小補跑都洗一行訊息）。達門檻並回到即時後由 flushAwaySummary 統一輸出。
-    // 🚀 v3.2.78 補跑改「計算時間預算」榨乾：因 state.ff 期間已完全壓掉重繪/動畫/特效，每個 tick 很便宜，
-    //   不再硬性 100 tick/次上限（舊制會讓長時間離開回來後每次迴圈只補 100 tick、要慢慢跑好幾秒甚至十幾秒）。
-    //   改成一路補到本次呼叫累計花掉 ~CATCHUP_BUDGET_MS 才讓步，剩下的留給下一個 100ms 迴圈。
-    //   掛機收益一格不少（不裁切 _tickDebt，只扣真正跑掉的 tick），只是追平得更快、且 UI 仍保持回應。
-    const CATCHUP_BUDGET_MS = 40;   // 每次呼叫最多花在補跑的主執行緒時間（其餘留給點擊/存檔/瀏覽器繪製）
-    const HARD_TICK_CAP = 6000;     // 單次呼叫保底硬上限（防極端情況一次迴圈跑過久）
-    const _catchStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-    const _invBefore = {};
-    player.inv.forEach(i => { _invBefore[i.id] = (_invBefore[i.id] || 0) + i.cnt; });
-    const _goldBefore = player.gold;
+    if (!Number.isFinite(elapsed) || elapsed < 0) elapsed = 0;
+    _tickDebt += Math.min(elapsed, FF_MAX_ELAPSED_MS);   // 單次呼叫吸收上限 5 分鐘（防時鐘異常；背景大段時間走錨點、不經這裡）
+    if (_tickDebt < TICK_MS) return;
 
+    let owed = Math.floor(_tickDebt / TICK_MS);
+    if (owed <= 1) {   // 即時路徑：每次排程一個 tick（前景常態）
+        _tickDebt -= TICK_MS;
+        state.inTick = true;
+        try { tick(); } finally { state.inTick = false; settleDeadMobs(); }
+        flushTickRender();
+        return;
+    }
+
+    // ⏩ 補跑路徑（v3.6.95 重建 v3.2.78 時間預算榨乾制）：每次呼叫最多吃 FF_BUDGET_MS 計算時間就讓步，
+    //    未還完的債留待下次呼叫（每 16 tick 量一次 performance.now·FF_HARD_CAP 保底防單次過量）。
+    //    state.ff＝全域補跑閘（VFX/動畫/日誌/逐次重繪與存檔全部受抑制）；ffSmall＝≤2 秒小補跑放行擊殺特效/名條。
+    if (!_ffAcc) _ffAcc = { t0: Date.now(), ticks: 0, gold: (player.gold || 0), items: {} };   // ⏩ 補跑摘要：跨呼叫累計（還清時結算顯示）
+    // 🎁 補跑期間 logSys 靜音 → 逐項「獲得物品:」訊息全被吞掉；沿用 v3.6.86 前舊制：每批補跑前後
+    //    快照背包數量、以淨增量累積到 _ffAcc.items，還清時以「掛機期間獲得：」格式統一輸出一次。
+    let _invBefore = {};
+    try { player.inv.forEach(i => { _invBefore[i.id] = (_invBefore[i.id] || 0) + i.cnt; }); } catch (e) {}
     state.ff = true;
-    state.ffSmall = owed <= 20;   // 🩹 v3.4.49 「小補跑」旗標(≤2秒)：前景微卡頓(GC/存檔LZ壓縮/開大面板)也會觸發 owed>=2 補跑，該批擊殺原本被 vfxKill 的 ff 閘全部瞬消（用戶回報「死亡動畫有時不播」主因）。小批次放行死亡殘影(仍受 _deathGhostCount<12 節流)；長背景補跑維持全靜音免回前景爆量。
-    state.inTick = true;   // 🔧 架構#2：補跑期間同樣每個 tick 結束才清算死亡
-    let ran = 0;
+    state.ffSmall = owed <= 20;
+    let ran = 0, budget0 = now;
     try {
-        while(ran < owed && ran < HARD_TICK_CAP) {
-            if(!state.running || player.dead) break;
-            tick();
-            settleDeadMobs();   // 每個 tick 結束即清算，下一個 tick 以遞補完成的場面開始
-            ran++;
-            if((ran & 15) === 0) {   // 每 16 tick 量一次時間（省 performance.now 呼叫成本）；達預算即讓步
-                let _el = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - _catchStart;
-                if(_el >= CATCHUP_BUDGET_MS) break;
+        while (ran < owed && ran < FF_HARD_CAP) {
+            let tickError = null;
+            state.inTick = true;
+            try {
+                tick();
+            } catch (e) {
+                tickError = e;
+            } finally {
+                state.inTick = false;
+                try { settleDeadMobs(); } catch (e) { if (!tickError) tickError = e; }
+                ran++;   // 無論 tick／死亡結算是否丟例外，這一個時間單位都已嘗試過，必須扣帳
+            }
+            if (tickError) {
+                _ffErrorStreak++;
+                _ffAcc.failed = true;
+                try { console.error('[catchup] tick failed', tickError); } catch (e) {}
+                break;
+            }
+            _ffErrorStreak = 0;
+            if ((ran & 15) === 0) {
+                let t = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+                if (t - budget0 >= FF_BUDGET_MS) break;
             }
         }
     } finally {
-        state.ff = false;   // 保證即使 tick() 拋例外也會解除補跑旗標，避免畫面/出怪永久凍結
-        state.ffSmall = false;   // 🩹 v3.4.49 小補跑旗標一併復位
-        state.inTick = false;
-        settleDeadMobs();   // 保底：例外中斷時也完成清算
-        _tickDebt -= ran * TICK_MS;   // 只扣真正跑掉的 tick；未跑完的留待下一個迴圈繼續補
-        //   ⚠️ 必須在 finally 內：若 tick() 拋例外（如某傭兵技能的程式錯誤），這行原本會被跳過→已跑掉的 tick 沒從時間帳扣掉
-        //   → _tickDebt 只增不減、owed 越滾越大，每次迴圈都重跑一次巨量補跑再度拋例外＝遊戲時間永遠追不平、畫面卡住。
+        _tickDebt = Math.max(0, _tickDebt - ran * TICK_MS);
+        _ffAcc.ticks += ran;
+        if (_ffErrorStreak >= FF_ERROR_STREAK_MAX) {
+            _tickDebt = 0;
+            _ffAcc.aborted = true;
+        }
+        state.ff = false;
+        state.ffSmall = false;
     }
-
-    // 將這次補跑的淨增量併入累積（以前後數量差計算，含被消耗者的負值，最終只輸出淨正值）
-    const _invAfter = {};
-    player.inv.forEach(i => { _invAfter[i.id] = (_invAfter[i.id] || 0) + i.cnt; });
-    let _ids = new Set([...Object.keys(_invBefore), ...Object.keys(_invAfter)]);
-    _ids.forEach(id => {
-        let delta = (_invAfter[id] || 0) - (_invBefore[id] || 0);
-        if (delta !== 0) _awayAcc.items[id] = (_awayAcc.items[id] || 0) + delta;
-    });
-    let _goldGain = player.gold - _goldBefore;
-    if (_goldGain > 0) _awayAcc.gold += _goldGain;
-    _awayAcc.ticks += ran;
-
-    // 補跑結束，統一刷新畫面（累積所得於下一個即時 tick 開頭由 flushAwaySummary 統一輸出）
-    updateUI(); renderMobs(); renderTabs();
+    // 🎁 將本批補跑的背包淨增量併入累積（含被消耗者的負值；輸出時只列淨正值）——tick 拋例外也照併，已入袋的不漏記
+    try {
+        let _invAfter = {};
+        player.inv.forEach(i => { _invAfter[i.id] = (_invAfter[i.id] || 0) + i.cnt; });
+        new Set([...Object.keys(_invBefore), ...Object.keys(_invAfter)]).forEach(id => {
+            let d = (_invAfter[id] || 0) - (_invBefore[id] || 0);
+            if (d !== 0) _ffAcc.items[id] = (_ffAcc.items[id] || 0) + d;
+        });
+    } catch (e) {}
+    if (_tickDebt < TICK_MS) {   // 補跑完畢
+        let _acc = _ffAcc;
+        let _longCatchup = !!(_acc && _acc.ticks >= 30);
+        let _deferredSave = typeof takeCatchupSaveRequest === 'function' && takeCatchupSaveRequest();
+        if (_longCatchup) {   // ≥3 秒的補跑（回前景補幀）：統一刷新＋存檔＋摘要
+            try { renderMobs(); updateUI(); renderTabs(true); } catch (e) {}
+        } else {
+            flushTickRender();
+        }
+        let _needsSave = _longCatchup || _deferredSave || (_acc && _acc.failed);
+        let _saveOk = false;
+        if (_needsSave) {
+            try { _saveOk = saveGame() === true; } catch (e) {}
+        }
+        if (_saveOk && typeof window !== 'undefined' && typeof window.offlineCatchupSaveCommitted === 'function') {
+            try { window.offlineCatchupSaveCommitted(); } catch (e) {}
+        }
+        if (_longCatchup) {
+            try {
+                let _gd = (player.gold || 0) - _acc.gold;
+                let _sec = Math.round(_acc.ticks / 10);
+                let _dur = _sec >= 60 ? Math.floor(_sec / 60) + ' 分 ' + (_sec % 60) + ' 秒' : _sec + ' 秒';
+                logSys('<span class="text-cyan-300 font-bold">⏩ 掛機補跑完成：</span>已補上 ' + _dur + ' 的進度' + (_gd > 0 ? ('，金幣 +' + _gd.toLocaleString()) : '') + '。');
+                // 🎁 v3.6.86 前舊格式（用戶指示恢復）：補跑期間獲得物品彙整輸出（物品名依稀有度上色·頓號串接·只列淨正值）
+                let _gains = [];
+                for (let id in (_acc.items || {})) {
+                    if (_acc.items[id] > 0 && DB.items[id]) _gains.push({ id: id, n: _acc.items[id] });
+                }
+                if (_gains.length) {
+                    logSys(`<span class="sys-item-gain">掛機期間獲得：` + _gains
+                        .map(g => `<span class="${getItemColor({ id: g.id, en: 0 })} font-bold">${DB.items[g.id].n} ×${g.n}</span>`)
+                        .join('、') + `</span>`);
+                }
+            } catch (e) {}
+        }
+        if (_acc && _acc.aborted && typeof logSys === 'function') {
+            logSys('<span class="text-red-400 font-bold">補跑連續發生錯誤，已停止剩餘補跑，避免進度卡在重複補跑；請重新整理後確認。</span>');
+        }
+        _ffAcc = null;
+        _ffErrorStreak = 0;
+    } else {
+        flushTickRender();
+    }
 }
+// ⏩ v3.6.95 補跑參數：預算 40ms/次（保留 60ms 給點擊/繪製）·硬上限 6000 tick/次·前景單次 elapsed 上限 5 分鐘
+const FF_BUDGET_MS = 40;
+const FF_HARD_CAP = 6000;
+const FF_MAX_ELAPSED_MS = 300000;
+const FF_ERROR_STREAK_MAX = 3;
+let _ffAcc = null;   // 補跑摘要累計（跨多次 gameLoop 呼叫·還清時歸零）
+let _ffErrorStreak = 0;
 
 // 🛡️ 絕對屏障：與世界隔絕——無法攻擊/施法/用道具、不自然恢復、不受任何傷害（持續期間 player.buffs.sk_abs_barrier>0）
 function inAbsBarrier() { return !!(player.buffs && player.buffs.sk_abs_barrier > 0); }
@@ -856,6 +918,7 @@ function _pvpNormalizeKillWhisperRecord(raw) {
         avatar: TROLL_CLASS_BY_AVATAR[raw.avatar] ? raw.avatar : '男戰士',
         alignmentValue: pvpClampAlignment(raw.alignmentValue),
         levelOffset: Number.isFinite(Number(raw.levelOffset)) ? Math.max(-10, Math.min(10, Math.round(Number(raw.levelOffset)))) : undefined,
+        clanId: raw.clanId == null ? null : String(raw.clanId).slice(0, 64),
         revengeCount: revengeCount,
         awaitingRevenge: revengeCount < PVP_KILL_WHISPER_REVENGE_MAX && !!raw.awaitingRevenge,
         expiresAt: Math.max(0, Math.floor(Number(raw.expiresAt) || 0)),
@@ -865,9 +928,117 @@ function _pvpNormalizeKillWhisperRecord(raw) {
         updatedAt: Math.max(0, Math.floor(Number(raw.updatedAt) || 0))
     };
 }
+// 🔒 同名 NPC 的性向值在世界頻道、追殺、復仇與有效密語期間共用同一份鎖。
+//   進入戰鬥不解鎖；只有相關追蹤全部結束後才允許釋放。NPC 擊殺非邪惡玩家而轉紅時，
+//   會透過 pvpSetNpcAlignment 同步所有紀錄，不屬於隨機重抽。
+const PVP_ALIGN_LOCK_MAX = 200;   // 世界頻道會不斷產生新名字 → 上限保護；淘汰最舊且未凍結者
+function pvpAlignLockAll() {
+    if (!player.pvpAlignLock || typeof player.pvpAlignLock !== 'object' || Array.isArray(player.pvpAlignLock)) player.pvpAlignLock = {};
+    return player.pvpAlignLock;
+}
+// 宣戰凍結：鎖上記的血盟目前「與玩家」交戰中。
+// ⚠️ 必須走 npcClanWarIds（有 2 秒快取）而非 npcClanGetById——後者每次都 _clanReadState() 重讀＋解壓 localStorage，
+//    淘汰迴圈逐筆呼叫會變成 O(n²) 次儲存讀取，實測 230 筆就把分頁卡死。
+function pvpAlignLockFrozen(rec) {
+    if (!rec || !rec.c) return false;
+    try {
+        if (typeof npcClanWarIds !== 'function') return false;
+        return npcClanWarIds(player).indexOf(rec.c) >= 0;
+    } catch (e) { return false; }
+}
+function pvpAlignmentInUse(name) {
+    if (!player || !player.cls || !name) return false;
+    let key = String(name).slice(0, 24);
+    let same = rec => rec && String(rec.n || '').slice(0, 24) === key;
+    if (Array.isArray(player.trollPlayers) && player.trollPlayers.some(same)) return true;
+    if (Array.isArray(player.pvpRevengeList) && player.pvpRevengeList.some(same)) return true;
+    let now = Date.now();
+    return Array.isArray(player.pvpKillWhispers) && player.pvpKillWhispers.some(rec =>
+        same(rec) && (!!rec.awaitingRevenge || Math.max(0, Number(rec.expiresAt) || 0) > now)
+    );
+}
+function pvpLockAlignment(name, align, clanId) {
+    if (!player || !player.cls || !name) return pvpClampAlignment(align);
+    let all = pvpAlignLockAll(), key = String(name).slice(0, 24);
+    if (all[key]) {
+        if (clanId) all[key].c = String(clanId).slice(0, 64);
+        all[key].t = Date.now();
+        return pvpClampAlignment(all[key].v);
+    }
+    let keys = Object.keys(all);
+    if (keys.length >= PVP_ALIGN_LOCK_MAX) {
+        keys.sort((a, b) => (Number(all[a] && all[a].t) || 0) - (Number(all[b] && all[b].t) || 0));
+        for (let i = 0; i < keys.length && Object.keys(all).length >= PVP_ALIGN_LOCK_MAX; i++) {
+            if (!pvpAlignLockFrozen(all[keys[i]]) && !pvpAlignmentInUse(keys[i])) delete all[keys[i]];
+        }
+    }
+    all[key] = { v: pvpClampAlignment(align), t: Date.now(), c: clanId ? String(clanId).slice(0, 64) : null };
+    return all[key].v;
+}
+function pvpSetNpcAlignment(name, align, clanId) {
+    if (!player || !player.cls || !name) return pvpClampAlignment(align);
+    let key = String(name).slice(0, 24);
+    let value = pvpClampAlignment(align);
+    let all = pvpAlignLockAll();
+    let old = all[key];
+    let resolvedClanId = clanId ? String(clanId).slice(0, 64) : (old && old.c ? old.c : null);
+    all[key] = { v:value, t:Date.now(), c:resolvedClanId };
+    let sync = rec => {
+        if (!rec || String(rec.n || '').slice(0, 24) !== key) return;
+        rec.alignmentValue = value;
+        if (resolvedClanId && !rec.clanId) rec.clanId = resolvedClanId;
+    };
+    if (Array.isArray(player.trollPlayers)) player.trollPlayers.forEach(sync);
+    if (Array.isArray(player.pvpRevengeList)) player.pvpRevengeList.forEach(sync);
+    if (Array.isArray(player.pvpKillWhispers)) player.pvpKillWhispers.forEach(sync);
+    try {
+        if (typeof mapState !== 'undefined' && mapState && Array.isArray(mapState.mobs)) {
+            mapState.mobs.forEach(mob => {
+                if (mob && mob.trollPlayer && String(mob.n || '').slice(0, 24) === key) mob._pvpAlignment = value;
+            });
+        }
+    } catch (e) {}
+    try {
+        if (typeof _wcNpcs !== 'undefined' && _wcNpcs) {
+            Object.keys(_wcNpcs).forEach(id => {
+                let npc = _wcNpcs[id];
+                if (npc && String(npc.name || '').slice(0, 24) === key) npc.alignmentValue = value;
+            });
+        }
+    } catch (e) {}
+    try { if (typeof npcClanUpdateMemberAlignment === 'function') npcClanUpdateMemberAlignment(key, value, player); } catch (e) {}
+    try { if (typeof pandoraUpdateWandererAlignment === 'function') pandoraUpdateWandererAlignment(key, value); } catch (e) {}
+    return value;
+}
+function pvpLockedAlignment(name, fallback) {
+    if (!player || !player.cls || !name) return pvpClampAlignment(fallback);
+    let rec = pvpAlignLockAll()[String(name).slice(0, 24)];
+    return rec ? pvpClampAlignment(rec.v) : pvpClampAlignment(fallback);
+}
+function pvpIsAlignLocked(name) {
+    if (!player || !player.cls || !name) return false;
+    return !!pvpAlignLockAll()[String(name).slice(0, 24)];
+}
+function pvpReleaseAlignLock(name) {
+    if (!player || !player.cls || !name) return false;
+    let all = pvpAlignLockAll(), key = String(name).slice(0, 24), rec = all[key];
+    if (!rec || pvpAlignLockFrozen(rec) || pvpAlignmentInUse(key)) return false;
+    delete all[key];
+    return true;
+}
 function pvpEnsureState() {
     if (!player || !player.cls) return;
     player.alignmentValue = pvpClampAlignment(player.alignmentValue);
+    {   // 🔒 v3.6.81 性向值鎖正規化（舊存檔無此欄位／型別異常一律重建）
+        let all = pvpAlignLockAll();
+        for (let k in all) {
+            let r = all[k];
+            if (!r || typeof r !== 'object' || !Number.isFinite(Number(r.v))) { delete all[k]; continue; }
+            r.v = pvpClampAlignment(r.v);
+            r.t = Number(r.t) || Date.now();
+            r.c = r.c == null ? null : String(r.c).slice(0, 64);
+        }
+    }
     if (player.pvpOn === undefined) player.pvpOn = false;
     if (typeof npcClanWarActive === 'function' && npcClanWarActive(player)) player.pvpOn = true;
     if (!Array.isArray(player.pvpRevengeList)) player.pvpRevengeList = [];
@@ -876,9 +1047,16 @@ function pvpEnsureState() {
         avatar: TROLL_CLASS_BY_AVATAR[r.avatar] ? r.avatar : '男戰士',
         alignmentValue: pvpClampAlignment(r.alignmentValue),
         levelOffset: Number.isFinite(Number(r.levelOffset)) ? Math.max(-10, Math.min(10, Math.round(Number(r.levelOffset)))) : undefined,
+        clanId: r.clanId == null ? null : String(r.clanId).slice(0, 64),
         deaths: Math.max(1, Number(r.deaths) || 1),
         t: Number(r.t) || Date.now()
     }));
+    player.pvpRevengeList.forEach(rec => {
+        rec.alignmentValue = pvpLockAlignment(rec.n, rec.alignmentValue, rec.clanId);
+    });
+    if (Array.isArray(player.trollPlayers)) player.trollPlayers.forEach(rec => {
+        if (rec && rec.n) rec.alignmentValue = pvpLockAlignment(rec.n, rec.alignmentValue, rec.clanId);
+    });
     let whisperByName = Object.create(null);
     (Array.isArray(player.pvpKillWhispers) ? player.pvpKillWhispers : []).forEach(raw => {
         let rec = _pvpNormalizeKillWhisperRecord(raw);
@@ -889,6 +1067,9 @@ function pvpEnsureState() {
         .map(n => whisperByName[n])
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, PVP_KILL_WHISPER_RECORD_MAX);
+    player.pvpKillWhispers.forEach(rec => {
+        rec.alignmentValue = pvpLockAlignment(rec.n, rec.alignmentValue, rec.clanId);
+    });
 }
 function pvpAlignmentKind(v) {
     v = pvpClampAlignment(v);
@@ -1012,6 +1193,9 @@ function pvpCreateRandomOpponent(onFieldNames, clanOptions) {
         let opts = Object.assign({}, clanOptions || {}, { onFieldNames:onFieldNames || [] });
         entry = npcClanAssignOpponent(entry, opts) || entry;
     }
+    if (!(clanOptions && clanOptions.skipClanAssign)) {
+        entry.alignmentValue = pvpLockAlignment(entry.n, entry.alignmentValue, entry.clanId);
+    }
     return entry;
 }
 function pvpMarkForChase(entry) {
@@ -1022,11 +1206,14 @@ function pvpMarkForChase(entry) {
     if (!Number.isFinite(Number(entry.levelOffset)) && old && Number.isFinite(Number(old.levelOffset))) {
         entry.levelOffset = old.levelOffset;
     }
+    let clanId = entry.clanId || (old && old.clanId) || null;
+    let alignmentValue = pvpLockAlignment(entry.n, entry.alignmentValue, clanId);
     let rec = {
         n: String(entry.n).slice(0, 24),
         avatar: TROLL_CLASS_BY_AVATAR[entry.avatar] ? entry.avatar : '男戰士',
-        alignmentValue: pvpClampAlignment(entry.alignmentValue),
+        alignmentValue: alignmentValue,
         levelOffset: pvpResolveLevelOffset(entry),
+        clanId: clanId,
         revengeCount: Math.max(0, Math.min(PVP_KILL_WHISPER_REVENGE_MAX, Math.floor(Number(entry.revengeCount) || 0))),
         pvpRevenge: true,
         noExpire: true,
@@ -1068,7 +1255,9 @@ function pvpRegisterKillWhisper(mob) {
         };
     }
     rec.avatar = TROLL_CLASS_BY_AVATAR[mob._pvpAvatar] ? mob._pvpAvatar : '男戰士';
-    rec.alignmentValue = pvpClampAlignment(mob._pvpAlignment || 0);
+    rec.clanId = mob._npcClanId || rec.clanId || null;
+    rec.alignmentValue = pvpLockAlignment(mob.n, mob._pvpAlignment || 0, rec.clanId);
+    mob._pvpAlignment = rec.alignmentValue;
     if (Number.isFinite(Number(mob._pvpLevelOffset))) rec.levelOffset = pvpResolveLevelOffset({ levelOffset: mob._pvpLevelOffset });
     rec.awaitingRevenge = false;
     rec.repliedSeq = rec.whisperSeq;
@@ -1085,8 +1274,13 @@ function pvpRegisterKillWhisper(mob) {
 function pvpAddRevengeFromMob(mob) {
     if (!mob || !mob.trollPlayer || !mob.n) return;
     pvpEnsureState();
-    let align = pvpClampAlignment(mob._pvpAlignment || 0);
-    if (pvpClampAlignment(player.alignmentValue) > PVP_ALIGN_EVIL) align = Math.min(align, -12000);
+    let clanId = mob._npcClanId || null;
+    let align = pvpLockAlignment(mob.n, mob._pvpAlignment || 0, clanId);
+    if (pvpClampAlignment(player.alignmentValue) > PVP_ALIGN_EVIL) {
+        let evilAlignment = Math.min(align, -12000);
+        if (evilAlignment !== align) align = pvpSetNpcAlignment(mob.n, evilAlignment, clanId);
+    }
+    mob._pvpAlignment = align;
     let avatar = mob._pvpAvatar || '男戰士';
     let list = player.pvpRevengeList || [];
     let old = list.find(r => r && r.n === mob.n);
@@ -1094,6 +1288,7 @@ function pvpAddRevengeFromMob(mob) {
         old.avatar = avatar;
         old.alignmentValue = align;
         if (Number.isFinite(Number(mob._pvpLevelOffset))) old.levelOffset = pvpResolveLevelOffset({ levelOffset: mob._pvpLevelOffset });
+        old.clanId = clanId || old.clanId || null;
         old.deaths = (old.deaths || 1) + 1;
         old.t = Date.now();
     } else {
@@ -1102,6 +1297,7 @@ function pvpAddRevengeFromMob(mob) {
             avatar: avatar,
             alignmentValue: align,
             levelOffset: Number.isFinite(Number(mob._pvpLevelOffset)) ? pvpResolveLevelOffset({ levelOffset: mob._pvpLevelOffset }) : pvpRandomLevelOffset(),
+            clanId: clanId,
             deaths: 1,
             t: Date.now()
         });
@@ -1277,8 +1473,18 @@ function pvpPostKillWhisperTick() {
     pvpEnsureState();
     let now = Date.now();
     let changed = false;
-    (player.pvpKillWhispers || []).forEach(rec => {
-        if (!rec || rec.revengeCount >= PVP_KILL_WHISPER_REVENGE_MAX || rec.awaitingRevenge) return;
+    let list = player.pvpKillWhispers || [];
+    let kept = [];
+    let expiredNames = [];
+    list.forEach(rec => {
+        if (!rec) { changed = true; return; }
+        if (!rec.awaitingRevenge && rec.expiresAt && now >= rec.expiresAt) {
+            expiredNames.push(rec.n);
+            changed = true;
+            return;
+        }
+        kept.push(rec);
+        if (rec.revengeCount >= PVP_KILL_WHISPER_REVENGE_MAX || rec.awaitingRevenge) return;
         if (!rec.nextCheckAt || now < rec.nextCheckAt || now >= rec.expiresAt) return;
         let dueCount = 1 + Math.floor((now - rec.nextCheckAt) / PVP_KILL_WHISPER_INTERVAL_MS);
         let remainingChecks = Math.max(0, Math.ceil((rec.expiresAt - rec.nextCheckAt) / PVP_KILL_WHISPER_INTERVAL_MS));
@@ -1293,6 +1499,10 @@ function pvpPostKillWhisperTick() {
             _pvpKillWhisperLog(rec);
         }
     });
+    if (kept.length !== list.length) {
+        player.pvpKillWhispers = kept;
+        expiredNames.forEach(name => pvpReleaseAlignLock(name));
+    }
     if (changed) {
         try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
     }
@@ -1583,11 +1793,19 @@ function spawnMob(idx) {
         if (player.trollPlayers && player.trollPlayers.length) {
             let _now = Date.now();
             let _tl = player.trollPlayers.filter(t => t && (t.noExpire || t.pvpRevenge || t.until > _now));
-            if (_tl.length !== player.trollPlayers.length) player.trollPlayers = _tl;
+            if (_tl.length !== player.trollPlayers.length) {
+                let _keep = new Set(_tl.map(t => t && t.n));
+                let _expiredNames = player.trollPlayers.filter(t => t && t.n && !_keep.has(t.n)).map(t => t.n);
+                player.trollPlayers = _tl;
+                _expiredNames.forEach(n => { if (typeof pvpReleaseAlignLock === 'function') pvpReleaseAlignLock(n); });
+            }
             if (_tl.length && !PURE_BOSS_MAPS.includes(mapState.current) && !isSiegeArea(mapState.current) && Math.random() < ((typeof window !== 'undefined' && window.__FB5_TEST_BUILD) ? 1 : 0.05)) {   // 🧪 TEST版：野外重生必定遭遇（正式版 5%）
                 let _onF = mapState.mobs.filter(m => m).map(m => m.n);
                 let _cand = _tl.filter(t => !_onF.includes(t.n));
-                if (_cand.length) { let _t = _cand[Math.floor(Math.random() * _cand.length)]; mobId = trollPickClassMob(_t.avatar); mapState._trollSpawn = _t; }   // 😤 v3.6.20 70%/30% 模板抽選
+                if (_cand.length) {
+                    let _t = _cand[Math.floor(Math.random() * _cand.length)]; mobId = trollPickClassMob(_t.avatar); mapState._trollSpawn = _t;   // 😤 v3.6.20 70%/30% 模板抽選
+                    if (typeof pvpLockAlignment === 'function') _t.alignmentValue = pvpLockAlignment(_t.n, _t.alignmentValue, _t.clanId);
+                }
             }
         }
     }
@@ -1647,6 +1865,9 @@ function spawnMob(idx) {
         if (_t && !_t._npcClanAssigned && typeof npcClanAssignOpponent === 'function') {
             _t = npcClanAssignOpponent(_t) || _t;
             mapState._trollSpawn = _t;
+        }
+        if (_t && typeof pvpLockAlignment === 'function') {
+            _t.alignmentValue = pvpLockAlignment(_t.n, _t.alignmentValue, _t.clanId);
         }
         applyTrollScaling(mapState.mobs[idx], pvpTrollLevelOverride(_t));
         if (_t) {
@@ -2323,8 +2544,7 @@ function dualWieldOffhandAttack(t) {
 function syncDualWield() {
     if (player.eq.offwpn && (!dualWieldOffhandOk() || !warriorDualWieldWpnOk(player.eq.offwpn.id))) {
         let e = player.eq.offwpn;
-        let ex = player.inv.find(i => sameItemSig(i, e) && !i.lock && !i.junk);
-        if (ex) ex.cnt += e.cnt; else player.inv.push(e);
+        if (!invMergeBack(e)) player.inv.push(e);   // 🔒 v3.6.92 單一真相 invMergeBack（js/01）
         player.eq.offwpn = null;
         logSys('副手武器已卸下（不符迅猛雙斧雙持條件）。');
     }

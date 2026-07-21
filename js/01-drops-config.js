@@ -776,8 +776,23 @@ const BUFF_NAMES = {   // buff 鍵 → 顯示名稱（DB.skills 查不到時使�
 // 遠古變體 true→'A'（其餘 'eternal'/'immortal'/'primordial' 原值）、屬性詞綴 attr。
 // 使用處：gainItem 堆疊、卸裝/換裝退回背包合併、倉庫一鍵存入(whSig)/堆疊(_whStackFind)、
 // 載入合併(consolidateInventory)、分頁重繪記憶簽章(renderTabs)。勿再各自手寫比對條件。
-function itemSig(it) { return it.id + '|' + (it.en || 0) + '|' + (it.bless === true ? 'B' : (it.bless ? 'C' : 0)) + '|' + (it.anc === true ? 'A' : (it.anc || 0)) + '|' + (it.attr || '') + '|' + (it.seteff || '') + (it.attrMagic ? '|' + it.attrMagic : ''); }   // 🔮 屬性附加魔法採可選尾碼：魔法武器不與普通品合併，普通品既有簽章／廢品偏好維持相容
+function itemSig(it) { let _ams = Math.max(1, Math.min(3, Math.floor(Number(it.attrMagicStar) || 1))); return it.id + '|' + (it.en || 0) + '|' + (it.bless === true ? 'B' : (it.bless ? 'C' : 0)) + '|' + (it.anc === true ? 'A' : (it.anc || 0)) + '|' + (it.attr || '') + '|' + (it.seteff || '') + (it.attrMagic ? '|' + it.attrMagic + (_ams > 1 ? '@' + _ams : '') : ''); }   // 🔮 屬性附加魔法採可選尾碼；1星沿用舊簽章，2/3星分開，避免合併時遺失星級
 function sameItemSig(a, b) { return itemSig(a) === itemSig(b); }
+// 🔒 v3.6.92 「退回背包」的堆疊合併單一真相（卸裝/換裝/箭矢同步/副手同步/舊檔遷移共 6 處呼叫）：
+//    ① 併入同簽章堆疊——含鎖定疊（現行不變量＝同簽章永遠只有一格；舊制刻意跳過鎖定疊會多開一格）。
+//    ② 不併入「已標廢品」的堆疊：退回的裝備會跟著被自動販賣掃走。
+//    ③ 保護狀態只會擴散、不會遺失：來源鎖定→整疊鎖定並清掉廢品標記
+//       （舊制沒有這步——鎖定的裝備卸下併入未鎖疊時，鎖定狀態會靜默消失）。
+//    ④ 巨靈願望戒指(gw)每只的願望各自獨立，而 itemSig 不含 gw → 兩側都要排除，否則併疊會吃掉一份願望。
+//    回傳 true＝已併入既有堆疊；false＝呼叫端需自行 player.inv.push(e)。
+function invMergeBack(e) {
+    if (!e || e.gw) return false;
+    let ex = player.inv.find(i => !i.gw && !i.junk && sameItemSig(i, e));
+    if (!ex) return false;
+    ex.cnt = (ex.cnt || 1) + (e.cnt || 1);
+    if (e.lock) { ex.lock = true; ex.junk = false; }
+    return true;
+}
 
 // ===== 🔧 架構#6：存檔版本與集中式預設值 =====
 // 存檔寫入 v 欄位（SAVE_VERSION）；loadGame 在跑完「轉換型」舊檔遷移後呼叫 applySaveDefaults()
@@ -837,6 +852,11 @@ let _forceSherineSet = false;   // 🔮 席琳製作：成品必定附帶隨機�
 let _tradLootCtx = false;   // 🏛️ 傳統模式「掠奪上下文」（⚠️v3.0.83 傳統模式已取消：旗標已無消費者·僅保留宣告讓各處 set/restore 站點不拋錯）
 let _noAffixCtx = false;    // 🦴 「白板上下文」：設 true 時 gainItem 不附加詞綴（祝福/詛咒/屬性）但仍放行傳統自帶強化值——供寵物裝備製作（白板＋隨機強化值，機率同飾品）
 let _forceBless = false;    // 🔧 v3.1.27 製作：設 true 時 gainItem 產出必定祝福（doCraft 消耗到祝福裝備材料時逐件設定；寵物白板 _noAffixCtx 仍優先擋）
+// 🔒 v3.6.92 一次性關閉「併入鎖定堆疊」：唯一設定點＝js/14 ensureMaterial（製作遞迴補製中間物）。
+//    通則是「再次獲得同物品→直接併同一格、整疊受鎖定保護」（用戶拍板），但製作遞迴的中間物若併進鎖定疊，
+//    invCountId/buildPool（皆排除鎖定件）看不到它 → 父層 consumeMaterialById 扣不到 → 底層材料被吃掉、中間物卻沒扣。
+//    故中間物一律另開未鎖定疊、當場被父層消耗掉；殘量待下次 consolidateInventory 併回。
+let _lockMergeOff = false;
 let _craftBlessCount = 0;   // 🔧 v3.1.27 製作：本次 doCraft 消耗到的「祝福裝備」材料件數（consumeMaterialById/whConsumeId 累加·doCraft 前歸零、依此逐件強制祝福）
 let _vfxLootCtx = false;   // ✨ VFX：擊殺掉落期間設 true，供 gainItem 判定稀有(潘朵拉權重=1)掉落閃光
 let _lootMobInfo = null;   // 🐾 擊殺掉落期間設 {n,lv}＝掉落來源怪物，供 gainItem 顯示「怪名 給你 物品名 。」（商店/製作/NPC 兌換為 null→維持「獲得物品:」）
@@ -1202,25 +1222,54 @@ function skillReqLv(sk, skId) {
 let _echoFree = false;        // 🏅 迴響精通：免費連發旗標（連發那次不耗MP、不再連鎖）
 let _royalFreeCast = false;   // 👑 魔法精通：一般攻擊命中 10% 免MP額外施放選定攻擊技的旗標
 
-let state = { running: false, ticks: 0, pDmgTick: 0, ff: false, inTick: false };
-// 主迴圈計時（依真實經過時間補跑 tick）
+let state = { running: false, ticks: 0, pDmgTick: 0, ff: false, ffSmall: false, inTick: false };
+// 🔀 v3.6.95 混合制（用戶拍板）：「網頁還開著」的背景期間（切分頁/縮小）＝回前景時補幀全額補跑（state.ff 補跑重建）；
+//    「真正關閉網頁」後重開＝js/27 離線收益（實戰速率×70%）。兩軌互斥，靠下方錨點與 js/27 的重置防重複入帳。
 const TICK_MS = 100;                 // 一個邏輯 tick 代表的真實時間
 const JUNK_AUTOSELL_TICKS = 100;    // 🗑️ 廢品自動賣出間隔：10 秒（100 tick × 100ms·2026-07-01 由 1800/3分鐘改快）；玩家手動標示廢品會把倒數重置為此值（標完 10 秒無新動作才賣）。⚠️自動賣出這條路徑不 saveGame(見 autoSellJunk)，靠其他既有存檔點落地
 const MERC_EXP_SHARE = 0.5;          // ⚠️v3.0.86 已停用：傭兵經驗改「主玩家＋未倒地傭兵」4 人均分制（見 js/05 partyExpShareCount／killMob）；常數保留避免外部殘留引用報錯
 // 🤝 Phase4：設為「全體」的怪物攻擊技能名（依 mag.skn 比對·同名全部生效）→ 同時打玩家＋全部非倒地傭兵。其餘怪物傷害/狀態魔法仍可依仇恨權重隨機打單一目標(玩家或某傭兵)。
 const MOB_PARTY_AOE_SKILLS = new Set(['闇黑波動','毒霧','鐮刀波動','火焰之舞','燃燒的火球','火焰之陣','地面震裂','跳躍波動','冰雪暴','震裂術','咆哮','燃燒立方','火焰噴吐','流星雨','火牢','寒冰噴吐','巨水炮','大地怒吼','毒氣風暴','閃電風暴','火焰雨','寒冰吐息','地獄犬噴吐','火風暴','龍捲風','爆炎的火球','噴火','漩渦','防身電擊','震裂踏擊','火焰放射','黑霧','火焰氣息','黑暗流星雨','放射斬','迴旋鞭打','衝擊波動','千刃破軍','靈魂波動','火焰爆發','迴旋斬','龍的一擊','地獄火','黑魔法力場','鐮刀劍氣斬','腐蝕之血','冰錐流星雨','水氣爆裂','集體衝暈','巨石爆裂','地面障礙','邪靈之氣','血夜月彎刀','夜魔飛襲','幻象光線','集體相消','劇毒龍捲風','麻痺蜘蛛網','雷霆風暴','沙塵暴','震裂重擊','冰雪颶風','衝擊之暈','岩漿流星雨','火焰散落','鎌鼬旋風','寒冰氣息','妖狐之火','牛鬼突進','大地崩裂','幽魂怨念','枯竭詛咒']);   // 🐍 提卡爾杰弗雷庫雙BOSS 全體技能；🌑 v3.3.33 聖地；🌅 枯竭詛咒對每位玩家/傭兵各自以 MR 判定藥水霜化
-const MAX_CATCHUP_MS = 5 * 60 * 1000; // 單次最多補算 5 分鐘，避免長時間離開後一次模擬過久
 let _loopLast = null;                // 上次主迴圈時間戳 (performance.now)
-let _tickDebt = 0;                   // 尚未換算成 tick 的累積時間 (ms)
+let _tickDebt = 0;                   // 前景未滿一個 tick 的時間餘量；完整逾期 tick 不保留
+let _ffSavePending = false;          // 補跑期間收到的存檔要求：還清後只補存一次，避免半套進度覆蓋 checkpoint
 let _gameLoopId = null;              // 主迴圈 setInterval id（用於避免重複註冊）
 let _saveLoopId = null;             // 自動存檔 setInterval id
 let currentSlot = 1;                // 目前所在的存檔位（1~4）
+
+function catchupActive() {
+    return !!(state && (state.ff || _tickDebt >= TICK_MS));
+}
+
+function deferCatchupSave() {
+    _ffSavePending = true;
+    return false;
+}
+
+function takeCatchupSaveRequest() {
+    let pending = _ffSavePending;
+    _ffSavePending = false;
+    return pending;
+}
+
+function catchupPendingMs() {
+    return Math.max(0, Number(_tickDebt) || 0);
+}
+
+function queueCatchupMs(ms) {
+    ms = Number(ms);
+    if (!Number.isFinite(ms) || ms <= 0 || !state || !state.running || !player || !player.cls || player.dead) return false;
+    _loopLast = _perfNow();
+    _tickDebt += ms;
+    return true;
+}
 
 // 統一啟動遊戲計時器：先清除既有的，再重新註冊，確保整個工作階段只會有一組計時器
 function startGameTimers() {
     if (_gameLoopId !== null) clearInterval(_gameLoopId);
     if (_saveLoopId !== null) clearInterval(_saveLoopId);
-    _loopLast = null; _tickDebt = 0;
+    _loopLast = null; _tickDebt = 0; _ffSavePending = false;
+    _ffHiddenAt = (typeof document !== 'undefined' && document.hidden) ? _perfNow() : 0;   // 🔀 遊戲啟動當下重新錨定（背景分頁裡載入的話，不把載入前的時間算進補跑）
     _gameLoopId = setInterval(gameLoop, 100);
     _saveLoopId = setInterval(saveGame, 300000); // 每 5 分鐘自動存檔
     if (typeof initCombatLogLock === 'function') initCombatLogLock();   // 🔒 綁定戰鬥日誌捲動鎖定（含去重）
@@ -1229,36 +1278,39 @@ function startGameTimers() {
     if (typeof _initTabGuard === 'function') _initTabGuard();           // 🚀 綁定分頁面板點擊保護＋重繪節流（避免狩獵時 賣出/強化 按鈕卡頓、點擊失效）
 }
 
-// 補跑（掛機/背景）所得累積：補跑期間 logSys 被靜音，先把所得累積起來，
-// 等真正回到即時（n===1）且累積時間達門檻時，才統一輸出一次，避免每次小補跑都洗版。
-const AWAY_SUMMARY_MIN_MS = 3000;    // 累積補跑時間達 3 秒才輸出「掛機期間獲得」訊息
-let _awayAcc = { ticks: 0, gold: 0, items: {} };
-// 🕶️ v3.4.44 「掛機期間獲得」訊息只在分頁確實切到背景時才輸出。gameLoop 的補跑(state.ff)判定純看「距上次 loop 過了多久」，
-//   前景一次長卡頓(saveGame 的 LZ 壓縮／開大量物品面板／GC)也會累積成補跑→原本會誤印掛機訊息。改用 visibilitychange
-//   記「本次累積窗口是否確實隱藏過」(sticky 旗標)：收益照計入 player.gold/inv、只 gate 這行訊息。
-let _awaySawHidden = false;
+function _perfNow() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
+function _resetGameLoopClock() { _loopLast = _perfNow(); _tickDebt = 0; _ffSavePending = false; }
+// 🔀 v3.6.95 背景時間錨點：切到背景記下時刻，回前景把「整段背景時間」一次記入 _tickDebt → gameLoop 補跑償還。
+//    ⚠️ 不靠背景中節流的 setInterval 逐次累積——Chrome 省電/凍結分頁時計時器可能完全不觸發，靠它會漏帳；
+//    錨點法對「節流」與「凍結」一視同仁。若背景中直接關頁，js/27 會保存尚未補跑的背景債，並從關頁時刻才開始離線收益。
+let _ffHiddenAt = (typeof document !== 'undefined' && document.hidden) ? _perfNow() : 0;
 if (typeof document !== 'undefined' && document.addEventListener) {
-    document.addEventListener('visibilitychange', function () { if (document.hidden) _awaySawHidden = true; });
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { if (!_ffHiddenAt) _ffHiddenAt = _perfNow(); return; }
+        let _now = _perfNow();
+        let _anchor = _ffHiddenAt; _ffHiddenAt = 0;
+        _loopLast = _now;   // 回前景：時鐘重設（背景段不經 elapsed 路徑、由下行整段入帳）
+        if (_anchor > 0 && typeof state !== 'undefined' && state.running && typeof player !== 'undefined' && player && player.cls && !player.dead) {
+            queueCatchupMs(Math.max(0, _now - _anchor));
+        }
+    });
 }
-function flushAwaySummary() {
-    if (_awayAcc.ticks <= 0) { _awaySawHidden = false; return; }   // 無累積：順手清掉「短暫隱藏但沒補跑」留下的旗標，避免下次前景卡頓被誤判為掛機
-    if (_awayAcc.ticks * TICK_MS >= AWAY_SUMMARY_MIN_MS && _awaySawHidden) {   // 🕶️ v3.4.44 加「確實隱藏過」條件：前景卡頓造成的補跑不印訊息（收益仍已入袋）
-        let gains = [];
-        for (let id in _awayAcc.items) {
-            if (_awayAcc.items[id] > 0 && DB.items[id]) gains.push({ id, n: _awayAcc.items[id] });
+if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('pageshow', function (ev) {
+        // bfcache 的頁面與 JS 記憶體仍存在，屬於「網頁還開著」：保留並補上整段背景時間。
+        if (ev && ev.persisted) {
+            let _now = _perfNow();
+            let _anchor = _ffHiddenAt;
+            _ffHiddenAt = 0;
+            _loopLast = _now;
+            if (_anchor > 0 && typeof state !== 'undefined' && state.running && typeof player !== 'undefined' && player && player.cls && !player.dead) {
+                queueCatchupMs(Math.max(0, _now - _anchor));
+            }
+            return;
         }
-        if (gains.length) {
-            logSys(`<span class="sys-item-gain">掛機期間獲得：` + gains
-                .map(g => `<span class="${getItemColor({ id: g.id, en: 0 })} font-bold">${DB.items[g.id].n} ×${g.n}</span>`)
-                .join('、') + `</span>`);
-        }
-        if (_awayAcc.gold > 0) {
-            /* 🔧 掛機期間獲得的金幣不輸出日誌（已計入 player.gold、即時顯示於左側面板）；賣出/花費/消耗等金幣訊息仍保留 */
-        }
-    }
-    // 無論是否達門檻都清空（未達門檻者視為一般即時遊玩的計時抖動，不輸出）
-    _awayAcc = { ticks: 0, gold: 0, items: {} };
-    _awaySawHidden = false;
+        _ffHiddenAt = 0;
+        _resetGameLoopClock();
+    });
 }
 
 let player = {
