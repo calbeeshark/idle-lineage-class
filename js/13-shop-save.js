@@ -66,7 +66,8 @@ const SPECIAL_AREA_BG = {   // 特殊地圖：逐張對應背景
     sunrise_east: 'assets/area/1920x1080/日出之國東之地.jpg',
     sunrise_west: 'assets/area/1920x1080/日出之國西之地.jpg',
     sunrise_north: 'assets/area/1920x1080/日出之國北之地.jpg',   // 🌅 日出之國四區（時空裂痕·日本風 1920×1080）
-    pirate_wild: 'assets/area/古魯丁.jpg',          // 🏴‍☠️ 海賊島（野外·借用古魯丁背景）
+    arena_pvp: 'assets/area/1920x1080/決鬥競技場.jpg',   // ⚔️ v3.7.13 決鬥競技場（不在 MAP_CATEGORIES→mapDisplayName 回 null·同名圖走不到，逐張指定完整路徑）
+    pirate_wild: 'assets/area/古魯丁.jpg',      // 🏴‍☠️ 海賊島（野外·借用古魯丁背景）
     pirate_dungeon: 'assets/area/說話之島地監1樓.jpg' // 🏴‍☠️ 海賊島地監（借用說話之島地監1樓背景）
 };
 const CATEGORY_AREA_BG = { wild: 'assets/area/村莊周邊.jpg', dungeon: 'assets/area/地監.jpg', siege: 'castle.png', tower: 'assets/area/傲慢之塔.jpg', rift: 'Rift.png' };   // 🆕 野外/地監/傲慢之塔狩獵使用 area-fit；攻城/裂痕有 SPECIAL_AREA_BG 新圖時同樣使用 area-fit，只有退回舊 castle.png/Rift.png 時維持舊版面。🗼 塔狩獵=傲慢之塔.jpg，入口安全區另由 TOWN_AREA_BG.tower 保留 TowerofInsolence.png 不變；🏛️ 底比斯3圖另由 SPECIAL_AREA_BG 覆寫（底比斯沙漠.jpg／底比斯.jpg）
@@ -87,14 +88,17 @@ const TOWN_AREA_BG = { village: 'village.png', castle: 'castle.png', tower: 'Tow
 //   AREA_1920＝目前資料夾內既有檔名(單一真相·同步判定·無探測閃爍)。狩獵區同名圖＋fallback 圖，凡名稱在此集合者一律優先取 1920x1080 版；安全區走下方 TOWN_BG_1920 逐城對應。
 //   ⚠️日後新增 assets/area/1920x1080/ 的圖，檔名(不含 .jpg)務必加進本集合才會被採用（否則退回舊 assets/area/ 或分類 fallback）。
 const AREA_1920 = new Set(['亞丁城鎮','伊娃王國','傲慢之塔','傲慢之塔11~20樓','傲慢之塔1樓','傲慢之塔21~30樓','傲慢之塔2~10樓','傲慢之塔31~40樓','傲慢之塔41~50樓','傲慢之塔51~60樓','傲慢之塔61~70樓','傲慢之塔71~80樓','傲慢之塔81~90樓','傲慢之塔91~100樓','冥法軍王之室','冥法軍訓練場','古代巨人之墓','古魯丁','古魯丁地監1樓','古魯丁地監2樓','古魯丁地監3樓','古魯丁地監4樓','古魯丁地監5樓','古魯丁地監6樓','古魯丁地監7樓','國境要塞','地下通道1樓','地下通道2樓','地下通道3樓','地監','地監深層','城鎮周邊','夢幻之島','大洞穴隱遁者村莊地區','奇岩','奇岩地監1樓','奇岩地監2樓','奇岩地監3樓','奇岩地監4樓','奇岩城鎮','妖精森林周邊','妖精森林村莊','妖魔森林','威頓村莊','安塔瑞斯','安塔瑞斯棲息地','巴拉卡斯','巴拉卡斯巢穴','希培利亞','席琳神殿','底比斯','底比斯 歐西里斯祭壇','底比斯 沙漠','底比斯 金字塔內部','底比斯沙漠','拉斯塔巴德','拉斯塔巴德地下洞穴1樓','拉斯塔巴德地下洞穴2樓','拉斯塔巴德地下洞穴3樓','拉斯塔巴德正門','提卡爾 庫庫爾坎祭壇','提卡爾神廟地區','提卡爾神廟地區深處','新兵修練場','時空裂痕入口','暗影神殿','暗殺軍王之室','村莊周邊','格蘭肯神殿．長老之室','森林','歐瑞','歐瑞村莊','歐瑞雪原','歐瑞雪壁','水晶洞穴','水晶洞穴1樓','水晶洞穴2樓','水晶洞穴3樓','沉默洞穴','沉默洞穴周邊','沙漠','沙漠地監1樓','沙漠地監2樓','沙漠地監3樓','沙漠地監4樓','法令軍王之室','法利昂','法利昂洞穴','洞窟','海賊島','海賊島地監','海賊島村莊','海音','海音城鎮','火龍窟','炎魔謁見所','燃柳村莊','眠龍洞穴1樓','眠龍洞穴2樓','眠龍洞穴3樓','精靈墓穴','肯特','艾爾摩','艾爾摩激戰地','荒野','螞蟻洞穴1樓','螞蟻洞穴2樓','螞蟻洞窟1樓','螞蟻洞窟2樓','說話之島周邊','說話之島地監1樓','說話之島地監2樓','說話之島村莊','說話之島港口','象牙塔','象牙塔4樓','象牙塔5樓','象牙塔6樓','象牙塔7樓','象牙塔8樓','象牙塔深層','象牙塔（1~3樓）','貝希摩斯','軍王之室','遺忘之島','銀騎士地區','銀騎士村莊','鏡子森林','風木','魔族神殿','魔獸訓練場','魔獸軍王之室','黃昏山脈','黑魔法研究室','龍之谷','龍之谷地監1樓','龍之谷地監2樓','龍之谷地監3樓','龍之谷地監4樓','龍之谷地監5樓','龍之谷地監6樓','龍之谷地監深層']);
+AREA_1920.add('古魯丁村莊');
+AREA_1920.add('決鬥競技場');
 ['肯特外門區','肯特內城','風木外門區','風木內城','海音外門區','海音內城','時空裂痕戰場','日出之國城墎','日出之國東之地','日出之國西之地','日出之國北之地'].forEach(name => AREA_1920.add(name));
+['侵蝕的安塔瑞斯巢穴入口','侵蝕的安塔瑞斯巢穴通道','侵蝕的安塔瑞斯巢穴深處','侵蝕的安塔瑞斯棲息地'].forEach(name => AREA_1920.add(name));   // 🐉 v3.7.58 安塔瑞斯副本 4 區專屬背景（名稱對應 js/05 ANTHARAS_AREA_NAMES）
 function areaBg1920(name) { return (name && AREA_1920.has(name)) ? ('assets/area/1920x1080/' + name + '.jpg') : null; }   // 名稱→1920 路徑(存在才回傳)
 function upgradeAreaPath(path) { if (!path) return path; let m = /^assets\/area\/([^\/]+)\.jpg$/.exec(path); return (m && AREA_1920.has(m[1])) ? ('assets/area/1920x1080/' + m[1] + '.jpg') : path; }   // 舊 assets/area/<名>.jpg fallback 路徑就地升級到 1920×1080(若有新圖)；非此格式(如 castle.png)原樣
 // 🏙️ v3.2.80 安全區逐城 1920×1080 背景(town id → 檔名)：命名差異(村/村莊/城鎮/full-width括號)以此表精準對應；未列者(攻城城堡 town_*_castle 等)退回舊 assets/background 通用圖
 const TOWN_BG_1920 = {
     town_aden: '亞丁城鎮', town_giran: '奇岩城鎮', town_heine: '海音城鎮', town_oren: '歐瑞村莊',
     town_kent_castle: '肯特城', town_windwood_castle: '風木城', town_heine_castle: '海音城',
-    town_elf: '妖精森林村莊', town_talking: '說話之島村莊', town_gludio: '燃柳村莊', town_witon: '威頓村莊',
+    town_elf: '妖精森林村莊', town_talking: '說話之島村莊', town_gludio: '燃柳村莊', town_gludin: '古魯丁村莊', town_witon: '威頓村莊',
     town_hyperia: '希培利亞', town_silver_knight: '銀騎士村莊', town_ivory_tower: '象牙塔（1~3樓）',
     town_sherine: '席琳神殿', town_silent: '沉默洞穴', town_behemoth: '貝希摩斯', town_flame_audience: '炎魔謁見所',
     town_pride: '傲慢之塔1樓', town_rift: '時空裂痕入口', town_pirate_village: '海賊島村莊',
@@ -113,7 +117,8 @@ function applyAreaBackground() {
         // 🖼️ 優先尋找「同名地圖圖檔」assets/area/1920x1080/[地圖名稱].jpg：以 AREA_1920 集合同步判定(無探測、無 404、無閃爍)；不在集合者一律走 fallback 圖。
         let _nm = mapDisplayName(cur);
         if (!_nm && cur === 'windwood_dungeon') _nm = '風木地監';   // 🏰 風木地監＝動態城堡區(不在 MAP_CATEGORIES)：手動指定同名圖名；'風木地監' 不在 AREA_1920 → 實際取 fbImg(地監.jpg→升級為 1920×1080 版)
-        if (!_nm && HIDDEN_AREA_BG[cur]) _nm = HIDDEN_AREA_BG[cur];   // 🏛️ 隱藏狩獵區域(不在 MAP_CATEGORIES)：背景＝對應母地圖樓層圖（無生物研究室→象牙塔4樓…惡魔封印室→象牙塔8樓、巨蟻女皇棲息地→螞蟻洞穴2樓）；樓層名須在 AREA_1920 才會採用，否則退回 SPECIAL_AREA_BG（母圖通用背景）
+        if (!_nm && HIDDEN_AREA_BG[cur]) _nm = HIDDEN_AREA_BG[cur];
+        if (!_nm && typeof ANTHARAS_AREA_NAMES !== 'undefined' && ANTHARAS_AREA_NAMES[cur]) _nm = ANTHARAS_AREA_NAMES[cur];   // 🐉 v3.7.58 安塔瑞斯副本 4 區(不在 MAP_CATEGORIES)：顯示名→同名 1920×1080 專屬背景   // 🏛️ 隱藏狩獵區域(不在 MAP_CATEGORIES)：背景＝對應母地圖樓層圖（無生物研究室→象牙塔4樓…惡魔封印室→象牙塔8樓、巨蟻女皇棲息地→螞蟻洞穴2樓）；樓層名須在 AREA_1920 才會採用，否則退回 SPECIAL_AREA_BG（母圖通用背景）
         let _s1920 = areaBg1920(_nm);   // 🖼️ v3.2.80 新版 1920×1080 同名場景圖(同步判定·優先於分類 fallback)
         if (_s1920) { useSrc = _s1920; useFit = true; }
         else if (fbImg) { let _fb = upgradeAreaPath(fbImg); useSrc = _fb.indexOf('/') >= 0 ? _fb : `assets/background/${_fb}`; useFit = !AREA_BG_NOFIT.has(fbImg); }   // ⚔️ 預設 area-fit，僅舊 castle.png/Rift.png 例外；🖼️ fallback 圖亦經 upgradeAreaPath 升級 1920×1080(若有新圖)
@@ -298,29 +303,36 @@ function migrateSaves(){
     let oldS = _lsGet('lineage_idle_save');
     if(oldS && !_lsGet('lineage_idle_save_1')) _lzSetStoredRaw('lineage_idle_save_1', oldS);
 }
+// 🗑️ v3.7.94 清掉離線掛機（js/27，已整檔刪除）留下的 localStorage 殘骸：
+//    checkpoint／catchup／claim／profile 四種 key 都以 `lineage_idle_offline_v1_` 開頭，現在沒有任何讀取者，
+//    留著只是白佔配額（本專案的 localStorage 配額本來就吃緊）。存檔內的 player.offlineHunt 由 loadGame 順手刪除。
+(function _purgeOfflineLeftovers(){
+    try {
+        if(typeof localStorage === 'undefined') return;
+        Object.keys(localStorage)
+            .filter(k => String(k).indexOf('lineage_idle_offline_v1_') === 0)
+            .forEach(k => { try { localStorage.removeItem(k); } catch(e){} });
+    } catch(e){}
+})();
 // 🗑️ v3.5.83 移除 anySaveExists()：唯一用途是顯示主選單的 #btn-load，而該按鈕早已從 HTML 移除
 //    （主選單只剩「開始遊戲」→ openLoadSelect），四處 `btnLoad &&` 守衛全部恆為 null 短路。
-// 🔋「掛機中」徽章資料源（v3.6.97）：改與 js/27 離線結算同源——checkpoint（每 30 秒心跳＋關頁必寫·永遠較新）
-//    優先，退回存檔內 offlineHunt 快照。⚠️ 舊制只讀存檔快照：存檔只在 saveGame 時更新，非正常關閉
-//    （背景分頁被回收/當機）時停在數分鐘前的狀態 → 徽章與實際結算對不上。
-function _slotOfflineMeta(n, sum){
+// 🗑️ v3.7.94 用戶指定移除離線掛機（js/27 整檔刪除）：登入畫面的「掛機中」徽章、離線收益明細與其
+//    checkpoint 資料源（_slotOfflineStatusNow／_slotOfflineDuration／savedHunt／offlineId）一併移除。
+//    這個位置現在只剩「擔任傭兵」徽章，故 meta 縮到 mercEmployerOfSlot 需要的最小身分欄位。
+function _slotBadgeMeta(n, sum){
     if(!sum) return null;
-    // 身分 key 與 js/27 _offlineIdentity 同式：enSeed 缺漏時退回「存檔位|名字|職業」（角色存於第 n 格＝當時的 currentSlot）
-    let id = encodeURIComponent(String(sum.enSeed || (n + '|' + (sum.name || '') + '|' + sum.rawCls)));
-    return { roleFp: sum.roleFp || '', offlineId: id, savedHunt: sum.offlineHunt || null };
+    // 🧑‍🤝‍🧑 v3.7.85 「擔任傭兵」徽章：僱傭關係會變·每次刷新現查·不快取結果
+    return { slot: n, mercWho: { cls: sum.rawCls, name: sum.name, enSeed: sum.enSeed, classic: !!sum.classic } };
 }
-function _slotOfflineIdleNow(meta, activeRoleFps){
-    if(!meta) return false;
-    if(meta.roleFp && activeRoleFps && activeRoleFps.has(String(meta.roleFp))) return false;   // 有分頁正在玩＝補幀軌，不是離線掛機
-    let src = meta.savedHunt;
-    try {
-        let cp = JSON.parse(_lsGet('lineage_idle_offline_v1_checkpoint_' + meta.offlineId) || 'null');
-        if(cp && typeof cp === 'object' && cp.snapshot && typeof cp.snapshot === 'object'
-            && (Number(cp.lastActive) || 0) >= ((src && Number(src.awaySince)) || 0)) src = cp.snapshot;   // 與 _offlineSettle 相同的來源取捨
-    } catch(e){}
-    if(!src || src.eligible !== true || !src.map) return false;
-    let prof = src.profile;
-    return !!(prof && String(prof.map || '') === String(src.map) && Number(prof.killsPerMin) > 0);
+// 🧑‍🤝‍🧑 v3.7.85 該存檔位角色是否正受僱為別人的傭兵（受僱＝只能待安全區）
+function _slotPartyStatusNow(meta){
+    if(!meta || !meta.mercWho || typeof mercEmployerOfSlot !== 'function') return null;
+    try { return mercEmployerOfSlot(meta.slot, meta.mercWho); } catch(e){ return null; }
+}
+// 立繪頭頂置中的單行徽章。class 名沿用 `.load-slot-badge`＋紫色 `.load-badge-party`（v3.7.94 由 .load-offline-* 更名）。
+function _slotBadgeHtml(party){
+    if(!party) return '';
+    return `<span class="load-slot-status"><span class="load-slot-badge load-badge-party"><strong>擔任傭兵</strong></span></span>`;
 }
 
 function _summaryFromRaw(s){
@@ -337,7 +349,6 @@ function _summaryFromRaw(s){
             classic: !!p.classicMode,
             avatar: p.avatar || null,
             enSeed: p.enSeed || '',
-            offlineHunt: (p.offlineHunt && typeof p.offlineHunt === 'object') ? p.offlineHunt : null,
             roleFp: _roleFingerprint(p),
             pledge: (typeof clanNameForPlayer === 'function' ? clanNameForPlayer(p) : '') || '',
             hp: p.hp || 0,
@@ -396,6 +407,8 @@ function _roleSessionHeartbeat(){
     if(active) reg[_roleSessionId] = { ts:Date.now(), slot:currentSlot, fp:_roleFingerprint(player), name:player.name || '未命名' };
     else delete reg[_roleSessionId];
     _roleWriteObject(ROLE_SESSION_REGISTRY_KEY, reg);
+    if(active && typeof syncMercenaryEmploymentRegistry === 'function') syncMercenaryEmploymentRegistry();
+    if(active && typeof enforceMercenarySafeArea === 'function') enforceMercenarySafeArea();
 }
 function _roleOtherActiveSessions(){
     let reg = _rolePruneSessions(_roleReadObject(ROLE_SESSION_REGISTRY_KEY));
@@ -418,24 +431,39 @@ function _roleSaveAllowed(){
     return !stored || _roleFingerprint(stored) === fp;
 }
 setInterval(_roleSessionHeartbeat, 2000);
-// 🔄 登入畫面「掛機中」徽章活刷（v3.6.97）：其他分頁關頁除名／checkpoint 更新／TTL 過期都要即時反映在畫面上。
-//    只重算徽章、原地增刪 span——不整頁重繪（不打斷選取與立繪動畫），存檔面資料用 _loadSlotMeta 快取。
+// 🔄 登入畫面徽章活刷：只重算徽章、原地增刪 span——不整頁重繪（不打斷選取與立繪動畫），存檔面資料用 _loadSlotMeta 快取。
+//    🗑️ v3.7.94 移除離線掛機後這裡只剩「擔任傭兵」：僱主在別的分頁解散傭兵→這裡 2 秒內消失。
 setInterval(function(){
     let panel = document.getElementById('load-select-panel');
     if(!panel || panel.classList.contains('hidden')) return;
     let grid = document.getElementById('load-slot-grid');
     if(!grid) return;
-    const fps = new Set();
-    try { _roleOtherActiveSessions().forEach(s => { if(s && s.fp) fps.add(String(s.fp)); }); } catch(e){}
     grid.querySelectorAll('.load-slot-card[data-slot]').forEach(btn => {
-        let on = _slotOfflineIdleNow(_loadSlotMeta[Number(btn.getAttribute('data-slot'))], fps);
-        let badge = btn.querySelector('.load-offline-badge');
-        if(on && !badge){ badge = document.createElement('span'); badge.className = 'load-offline-badge'; badge.textContent = '掛機中'; btn.appendChild(badge); }
-        else if(!on && badge) badge.remove();
+        let party = _slotPartyStatusNow(_loadSlotMeta[Number(btn.getAttribute('data-slot'))]);
+        let old = btn.querySelector('.load-slot-status');
+        if(party){
+            let html = _slotBadgeHtml(party);
+            if(old) old.outerHTML = html;
+            else btn.insertAdjacentHTML('beforeend', html);
+        } else if(old) old.remove();
     });
 }, 2000);
-if(typeof window !== 'undefined') window.addEventListener('beforeunload', _roleSessionForget);
-if(typeof window !== 'undefined') window.addEventListener('pagehide', _roleSessionForget);   // beforeunload 在背景分頁被關閉時常不觸發；bfcache 還原後心跳 2 秒內自動重新註冊
+// 💾 v3.7.94 關頁／切背景的最終存檔。
+//    ⚠️ **這段不是可有可無的**：離線掛機（js/27）被移除前，唯一的 visibilitychange／pagehide／beforeunload
+//    存檔掛點在 js/27 裡（_offlinePauseAndSave／_offlineCloseAndSave）。整檔刪掉而不補這段的話，
+//    自動存檔是每 5 分鐘一次 → 關分頁最多會吐掉 5 分鐘進度。
+//    __fb5CloseFlush＝繞過下方 saveGame 的「補跑期間延後存檔」閘（背景節流喚醒間 _tickDebt 常 ≥100ms，
+//    不繞過＝最終進度不落地）。旗標名沿用 v3.7.31，由此處設定與清除。
+function _flushSaveNow(){
+    if(typeof player === 'undefined' || !player || !player.cls || typeof saveGame !== 'function') return;
+    if(typeof window !== 'undefined') window.__fb5CloseFlush = true;
+    try { saveGame(); } catch(e) {}
+    finally { if(typeof window !== 'undefined') window.__fb5CloseFlush = false; }
+}
+if(typeof document !== 'undefined' && document.addEventListener)
+    document.addEventListener('visibilitychange', function(){ if(document.hidden) _flushSaveNow(); });
+if(typeof window !== 'undefined') window.addEventListener('beforeunload', function(){ _flushSaveNow(); _roleSessionForget(); });
+if(typeof window !== 'undefined') window.addEventListener('pagehide', function(){ _flushSaveNow(); _roleSessionForget(); });   // beforeunload 在背景分頁被關閉時常不觸發；bfcache 還原後心跳 2 秒內自動重新註冊
 
 // 🗑️ v3.5.83 移除 openSlotSelect／chooseSlot／slotBackToMenu 與 #slot-select-panel：
 //    主選單唯一入口早已是 openLoadSelect()（index.html「開始遊戲」），舊的兩段式存檔位面板不可達。
@@ -501,7 +529,7 @@ async function exportSave(slot){
         alert('匯出失敗：角色、倉庫、寵物、龍之鑽石或血盟資料無法正確讀取，未產生匯出檔。');
         return;
     }
-    data = _saveWrap(data);   // 🛡️ 匯出檔加完整性簽章（前綴 'SIG1:'，匯入時驗章；payload 仍為明文 JSON）
+    data = _saveWrapPortable(data);   // 🛡️ 可攜匯出固定使用 SIG1，確保網頁版與桌面版可互相匯入
     let sum = slotSummary(slotNo);
     let cname = (sum && sum.name) ? sum.name : ('slot' + slotNo);   // 未命名 → 用 slotN 當檔名
     let fname = `fable5_save_${slotNo}_${cname}.json`;
@@ -784,14 +812,40 @@ function loadBackToMenu(){
     if(load) load.classList.add('hidden');
     if(main) main.classList.remove('hidden');
 }
+
+function returnToCharacterSelect(){
+    if(typeof player === 'undefined' || !player || !player.cls) return false;
+    _flushSaveNow();   // 🗑️ v3.7.94 原本走 js/27 的 offlinePrepareCharacterSelect（存檔＋寫離線快照）；離線掛機移除後只留最終存檔
+
+    if(typeof stopGameTimers === 'function') stopGameTimers();
+    if(typeof state !== 'undefined' && state) state.running = false;
+    try { _roleSessionForget(); } catch(e) {}
+    try { if(typeof _vfxClearAll === 'function') _vfxClearAll(); } catch(e) {}
+
+    const game = document.getElementById('game-screen');
+    const creationScreen = document.getElementById('creation-screen');
+    const main = document.getElementById('main-menu');
+    const creation = document.getElementById('creation-panel');
+    const load = document.getElementById('load-select-panel');
+    if(game) game.classList.add('hidden');
+    if(creationScreen) creationScreen.classList.remove('hidden');
+    if(main) main.classList.add('hidden');
+    if(creation) creation.classList.add('hidden');
+    if(load) load.classList.remove('hidden');
+    document.body.classList.remove('game-bg-dim', 'sherine-world', 'sherine-mad');
+
+    _loadLastClickSlot = 0;
+    _loadLastClickAt = 0;
+    _loadPage = currentSlot > 4 ? 1 : 0;
+    _loadSelectedSlot = currentSlot;
+    renderLoadSelect();
+    try { if(typeof _bgmTick === 'function') { _bgmScene = null; _bgmTick(); } } catch(e) {}
+    return true;
+}
 function renderLoadSelect(){
     const grid = document.getElementById('load-slot-grid');
     if(!grid) return;
     let html = '';
-    const activeRoleFps = new Set();
-    try {
-        _roleOtherActiveSessions().forEach(session => { if(session && session.fp) activeRoleFps.add(String(session.fp)); });
-    } catch(e){}
     const start = _loadPage * 4 + 1;
     for(let n = start; n <= start + 3; n++){
         const sum = slotSummary(n);
@@ -799,12 +853,11 @@ function renderLoadSelect(){
         const selected = n === _loadSelectedSlot;
         const empty = !sum;
         const frame = loadFirstFrame(key);
-        _loadSlotMeta[n] = _slotOfflineMeta(n, sum);
-        const offline = _slotOfflineIdleNow(_loadSlotMeta[n], activeRoleFps);
+        _loadSlotMeta[n] = _slotBadgeMeta(n, sum);
         const title = sum ? `角色 ${n} ${sum.cls} Lv.${sum.lv}` : `角色 ${n} 空`;
         html += `<button type="button" onclick="loadSelectSlot(${n})" data-slot="${n}" data-key="${key}" class="load-slot-card ${selected ? 'selected' : ''} ${empty ? 'empty' : 'filled'}" title="${loadEsc(title)}">`
             + `<img src="${loadFrameSrc(key, frame)}" alt="${loadEsc(title)}" draggable="false">`
-            + (offline ? `<span class="load-offline-badge">掛機中</span>` : '')
+            + _slotBadgeHtml(_slotPartyStatusNow(_loadSlotMeta[n]))
             + `</button>`;
     }
     grid.innerHTML = html;
@@ -1155,6 +1208,15 @@ function startGame() {
         backToMenu();
         return;
     }
+    // 🧼 v3.7.73 新角色＝乾淨的 player（修「刪角後創新職業，上一個角色的傭兵／萬能藥瓶數／精通狀態還在」）：
+    //   遊戲中按「返回角色選擇」→刪角→創新角色的過程沒有重載頁面，全域 player 仍是上一個角色的物件，
+    //   而本函式只逐欄覆寫其中一部分 → 未覆寫欄位被新角色整包繼承。這裡先還原成「頁面剛載入」的原型，
+    //   使之與「重新整理後創角」完全等價（下方逐欄設定的流程不變）。
+    _uiConfigReady = false;   // 還原期間 DOM 仍是上一角色的設定 → 禁止 saveGame 以它重建 config（與 loadGame 同一守則）
+    try { if (typeof _petRosterDirty !== 'undefined' && _petRosterDirty && player && player.cls && typeof petRosterSave === 'function') petRosterSave(); } catch (e) {}   // 上一角色未寫入的寵物名冊先 flush（比照 loadGame）
+    try { if (typeof _petRosterKey !== 'undefined') _petRosterKey = null; } catch (e) {}   // 失效記憶體快取→新角色重新從共用桶載入（防跨角色髒鏡像）
+    if (typeof freshPlayerState === 'function') player = freshPlayerState();
+    if (typeof freshMapState === 'function') mapState = freshMapState();
     if(typeof stopCreationFrameSfx === 'function') stopCreationFrameSfx();
     // 🔊 v3.4.17 進遊戲：隱藏 creation-panel（原本只隱藏 creation-screen 父層·子面板 classList 無 .hidden 殘留）＋停創角動畫。
     //    否則 _bgmIsCreateScreen()(js/17) 與創角逐幀動畫 tick(下方 animateCreationClassPreview) 都看 creation-panel→誤判「還在創角」→登入/創角 BGM 一直播、創角音效每 loop 重觸發。
@@ -1193,11 +1255,12 @@ function startGame() {
     player.skills = [];
     player.summon = null; player.charmed = null; player.manualCd = {}; player.hots = {}; player.elfEle = null; player.buffs = { haste: 0, brave: 0, blue: 0, cautious: 0, elfcookie: 0, poly: 0, shield: 0 };   // 🔧 v3.5.94 移除零讀取的舊制孤兒欄位 hot(單數)；團隊 HoT 休眠機制狀態一律存 hots(複數 dict)
     
+    resetConfigDomToDefaults();   // 🧼 v3.7.73 設定面板還原為預設：原本只清下面 7 個勾選框，藥水/施法門檻(HP%、MP%)、技能下拉與其餘勾選會被新角色繼承
     ['set-haste', 'set-brave', 'set-blue', 'set-cautious', 'set-poly', 'set-auto-buy-pot', 'set-auto-buy-arrow'].forEach(id => {
         let el = document.getElementById(id);
-        if(el) el.checked = false;
+        if(el) el.checked = false;   // 這 7 項維持「新角色一律關閉」（set-auto-buy-arrow 的 HTML 預設為勾選，但新角色刻意不開）
     });
-    
+
     // 依據不同職業配發專屬起始道具
     if (player.cls === 'elf') {
         gainItem('wpn_shortbow', 1, true, true);  // 短弓
@@ -1293,6 +1356,33 @@ function startGame() {
     saveGame();   // 🔧 創角完成立即存檔：先前要等 5 分鐘自動存檔，期間關閉頁面角色會直接消失
 }
 
+// 🧼 v3.7.73 自動化設定面板的「頁面載入預設值」快照＋還原（新角色專用）。
+//   不還原的話：saveGame 會用「上一個角色留在畫面上的設定」重建新角色的 player.config
+//   （藥水種類/HP%、攻擊技與 MP%、治癒技與 HP%、消耗HP技能門檻、各卷軸勾選…）。
+//   於本檔求值當下擷取——index.html 的設定面板 markup 在 <script> 標籤之前，此時取到的就是 HTML 預設值。
+const CONFIG_DOM_IDS = ['set-pot', 'set-hp-pot', 'set-auto-buy-pot', 'set-mp-atk', 'sel-atk-skill', 'set-mp-heal', 'sel-heal-skill',
+    'set-hp-skill', 'set-hp-convert', 'sel-convert-skill', 'set-haste', 'set-brave', 'set-blue', 'set-cautious',
+    'set-elfcookie', 'set-poly', 'set-magicbarrier', 'set-teleport', 'set-auto-buy-arrow'];
+const CONFIG_DOM_DEFAULTS = (function () {
+    let d = {};
+    try { CONFIG_DOM_IDS.forEach(id => { let el = document.getElementById(id); if (el) d[id] = (el.type === 'checkbox') ? el.checked : el.value; }); } catch (e) {}
+    return d;
+})();
+function resetConfigDomToDefaults() {
+    CONFIG_DOM_IDS.forEach(id => {
+        let el = document.getElementById(id);
+        if (!el || CONFIG_DOM_DEFAULTS[id] === undefined) return;
+        if (el.type === 'checkbox') el.checked = CONFIG_DOM_DEFAULTS[id]; else el.value = CONFIG_DOM_DEFAULTS[id];
+    });
+    // 藥水下拉的文字顏色由 onchange 維護，程式化賦值不會觸發 → 比照 loadGame 自行補上
+    let ps = document.getElementById('set-pot');
+    if (ps) {
+        ps.classList.remove('text-red-300', 'text-orange-300', 'text-white');
+        ps.classList.add(ps.value === 'potion_heal' ? 'text-red-300' : (ps.value === 'potion_strong' ? 'text-orange-300' : 'text-white'));
+    }
+    // 動態產生的法術 Buff 勾選列（上一角色的技能）：全部取消；新角色的清單稍後由 renderSkillSelects 重建
+    try { document.querySelectorAll('#auto-buff-skills input[type="checkbox"]').forEach(c => { c.checked = false; }); } catch (e) {}
+}
 function updateClassPotionRows() {
     // 勇敢藥水：騎士／龍騎士限定；慎重藥水：法師／幻術士限定；精靈餅乾：妖精限定
     let braveRow = document.getElementById('ui-brave-row');
@@ -1347,6 +1437,12 @@ function saveGame() {
     //    這些背景觸發會把空殼 player 寫進 currentSlot（預設 1）→ 毀掉該格真正的角色（顯示為 null／Lv.1／預設王族／資料不完整）。
     //    無 cls＝不是進行中的遊戲角色 → 一律拒寫，確保空殼永遠不覆蓋既有存檔。（真正的角色必有職業；創角於選職業後才 saveGame，不受影響。）
     if (!player || !player.cls) return false;
+    // ⏩ v3.7.30 補跑存檔延後（接上 v3.7.25 就設計好但漏接線的 deferCatchupSave）：真補跑會殺 BOSS（v3.7.24），
+    //    killMob 的頭目存檔點每殺必全量存檔（sanitize＋LZ＋寫入）拖慢補跑並造成卡頓尖峰；
+    //    補跑期間一律改記 _ffSavePending，還清後由 gameLoop 收尾的 takeCatchupSaveRequest 統一補存一次。
+    if (typeof catchupActive === 'function' && catchupActive() && typeof deferCatchupSave === 'function'
+        && !(typeof window !== 'undefined' && window.__fb5CloseFlush)) return deferCatchupSave();   // 🔚 v3.7.31 __fb5CloseFlush＝關頁/切背景的最終存檔（_flushSaveNow）不延後
+
     if (!_roleSaveAllowed()) {
         if(!_saveFailureNotified && typeof logSys === 'function') {
             _saveFailureNotified = true;
@@ -1487,6 +1583,7 @@ function loadGame() {
         //    舊文案多寫的「仍可用『刪除角色』清空」正好點名此情境唯一看不見的那顆按鈕，故移除。
         let d; try { d = JSON.parse(s); } catch(e){ alert('此存檔位的資料已毀損，無法載入。\n此欄位在載入畫面會顯示為空，請直接按「匯入進度」還原先前匯出的 .json 備份檔。'); return; }
         player = d.p; mapState = d.ms;
+        delete player.offlineHunt;   // 🗑️ v3.7.94 離線掛機已移除：舊存檔的逐地圖速率快照沒有讀取者，載入即丟掉（否則每次存檔都白帶一份）
         normalizeFacingRefsForSave();   // 舊存檔若含 v3.2.12 面向物件副本，載入時立即轉為 UID／隊員鍵並移除物件參照
         if (typeof applyGlobalAutoSellSettings === 'function') applyGlobalAutoSellSettings();   // 🔧 v2.6.91 功能5：載入角色時套用全域自動販賣設定（8 角色共用時覆蓋本檔規則）
         if (!player.enSeed) player.enSeed = 'es' + _seedHash((player.name || '') + '|' + (player.cls || '') + '|lz').toString(36);   // 🎲 舊存檔無強化種子：由角色名+職業決定論衍生（重匯入同一份舊檔也得相同種子→不能靠重匯入重洗強化）
