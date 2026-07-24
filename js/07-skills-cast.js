@@ -529,6 +529,7 @@ function castSkillInner(skId) {
                 let _after = (typeof _supHp === 'function') ? _supHp(c) : (c === player ? player.hp : (c.curHp != null ? c.curHp : c.hp));
                 _total += Math.max(0, _after - _before); _hit++;
             });
+            if (typeof threatHeal === 'function') threatHeal(player, _total);   // 🎯 v3.7.97 仇恨制：玩家全體治癒＝實際回復×0.5 記給玩家（overheal 不算）
             logCombat(`施放 ${sk.n}，立即治癒全隊 ${_hit} 名成員，共恢復 ${_total} 點 HP。${sk.msg || ''}`, 'heal');
         } else {
             let heal = rollHealingSpell(sk, player.d, player, _hTgt);
@@ -537,6 +538,7 @@ function castSkillInner(skId) {
             if (typeof _supHeal === 'function') _supHeal(_hTgt, heal); else if (_hTgt === player) player.hp = Math.min(player.mhp, player.hp + heal); else if (_hTgt.curHp != null) _hTgt.curHp = Math.min(_hTgt.mhp, (_hTgt.curHp || 0) + heal); else _hTgt.hp = Math.min(_hTgt.mhp, (_hTgt.hp || 0) + heal);
             let _after = (typeof _supHp === 'function') ? _supHp(_hTgt) : (_hTgt === player ? player.hp : (_hTgt.curHp != null ? _hTgt.curHp : _hTgt.hp));
             let _actual = Math.max(0, _after - _before);
+            if (typeof threatHeal === 'function') threatHeal(player, _actual);   // 🎯 v3.7.97 仇恨制：玩家單體治癒＝實際回復×0.5 記給玩家
             logCombat(`施放 ${sk.n}，恢復了${_hTgt === player ? '' : (' ' + ((typeof _supName === 'function') ? _supName(_hTgt) : ('協力·' + _hTgt._allyName)))} ${_actual} 點 HP。${sk.msg || ''}`, 'heal');
         }
         return true;
@@ -1021,6 +1023,7 @@ function autoActions() {
             if(sk.awaken && player.mastery !== 'k_awaken' && ['sk_dragon_awaken_antares','sk_dragon_awaken_falion','sk_dragon_awaken_baraka'].some(a => (player.buffs[a]||0) > 0)) return;   // 🐉 覺醒互斥：已有一種覺醒生效時不自動施放其他覺醒（避免互相清除而反覆耗HP/MP）；覺醒精通可同時三種
             if(sk.cube && mapState.current.startsWith('town_')) return;   // 🔮 立方：安全區(村莊)不自動施放，進入狩獵區(非 town_)才展開
             if(sk.stormInterval && mapState.current.startsWith('town_')) return;   // 🌨️🔥 火牢/冰雪颶風等持續傷害增益(STORM_BUFF_SKILLS)：安全區(村莊)無敵人→不自動施放(免空耗 MP/洗版)，與立方/轉換魔法一致
+            if(sid === 'sk_zombie' && typeof necroBookEquipped === 'function' && necroBookEquipped(player)) return;   // 🏺 v3.8.12 死靈之書：造屍術改為擊殺觸發的骷髏復生，不施法、不消耗 MP
             if(sk.summon && typeof _petInWild === 'function' && !_petInWild()) return;   // 🧟 v3.2.21 召喚類增益：安全區/無怪區不自動施放（v2 施放會被擋→免反覆嘗試洗版·比照立方/颶風）
             if(sk.costItem && mapState.current.startsWith('town_')) return;   // 🌀 消耗道具型增益：安全區無戰鬥損耗，不自動施放以免白耗材料（手動施放不受限）
             // 👑 力盔/敏盔版同效果已生效：跳過自動施放對應的法師/王族魔法版（recomputeStats@4037 會把同名 buff 歸零；若仍自動施放會每 tick 被歸零後反覆重施＝無限洗版）

@@ -548,7 +548,6 @@ function tick() {
     }
     _combatSrc = null;   // ⚔️ 戰鬥日誌來源：每 tick 起始重置（玩家攻擊/施法/DoT 等預設依顏色type推定；友方派發點會各自設定）
     _dpsAllyTurn = false; let _dpsPlayerSnap = _dpsSnap();   // 🎯 DPS：玩家階段起點快照（至怪物行動前的所有掉血＝玩家輸出·含自動施法/持續增益）
-    castleGuardTick();   // 🏰 城堡護衛：回血/力竭恢復/城堡擁有結束自動解散
     for(let k in player.manualCd) if(player.manualCd[k] > 0) player.manualCd[k]--;
     
     let canAct = true;
@@ -770,6 +769,7 @@ function tick() {
     }
     
     { let _pd = _dpsDealt(_dpsPlayerSnap); if (_pd > 0) _dps.player += _pd; }   // 🎯 DPS：結算玩家階段輸出（攻擊／自動施法／持續增益）；怪物中毒/出血 DoT 於 processMobStatusTick 另計入玩家
+    if (typeof threatCommitDiff === 'function') threatCommitDiff(_dpsPlayerSnap, player);   // 🎯 v3.7.97 仇恨制：玩家階段整段掉血→記給玩家（threatMult＝職業×武器·同快照差分）
     for(let i=0; i<mapState.mobs.length; i++) {   // 🆕 含後排(3,4)：所有在場怪皆會行動攻擊
         let m = mapState.mobs[i];
         if(!m) continue;
@@ -883,7 +883,7 @@ function tick() {
     }
 
     if(!player.dead) { let _auraSnap = _dpsSnap(); try { relicAuraTick(); } catch(e){} let _auraDealt = _dpsDealt(_auraSnap); if(_auraDealt > 0) _dps.player += _auraDealt; }   // 🏺 蠅災的詛咒等 auraDmg：玩家階段週期全體固定魔傷（自帶快照→正確計入玩家 DPS·修 code-review#1）
-    if(!player.dead) { _combatSrc = 'summon'; let _dpsSumSnap = _dpsSnap(); summonTick(player.summon, () => { player.summon = null; }); summonTick(player.charmed, () => { player.charmed = null; }); if (typeof summonV2Tick === 'function') { try { summonV2Tick(); } catch (e) {} }   /* 🧙 v3.2.19 召喚術 v2（多實體·js/23） */ if(player.cls === 'illusion') { cubeTick(); illuSummonTick(); } { let _sd = _dpsDealt(_dpsSumSnap); if (_sd > 0) _dps.summon += _sd; }   /* 🎯 DPS：召喚（玩家召喚/迷魅/幻術立方）輸出 */ _combatSrc = 'mercenary'; alliesTick(); _combatSrc = null; }   // ⚔️ 召喚(含迷魅)/傭兵 戰鬥訊息來源情境；🔮 幻術士立方週期效果＋幻術精通幻象
+    if(!player.dead) { _combatSrc = 'summon'; let _dpsSumSnap = _dpsSnap(); summonTick(player.summon, () => { player.summon = null; }); summonTick(player.charmed, () => { player.charmed = null; }); if (typeof summonV2Tick === 'function') { try { summonV2Tick(); } catch (e) {} }   /* 🧙 v3.2.19 召喚術 v2（多實體·js/23） */ if (typeof castleGuardTick === 'function') { try { castleGuardTick(); } catch (e) {} }   /* 🏰 城堡護衛 v2（可招募協同角色·js/31）：與召喚同階段·輸出計入 summon 桶 */ if(player.cls === 'illusion') { cubeTick(); illuSummonTick(); } { let _sd = _dpsDealt(_dpsSumSnap); if (_sd > 0) _dps.summon += _sd; }   /* 🎯 DPS：召喚（玩家召喚/迷魅/幻術立方/城堡護衛）輸出 */ _combatSrc = 'mercenary'; alliesTick(); _combatSrc = null; }   // ⚔️ 召喚(含迷魅)/傭兵 戰鬥訊息來源情境；🔮 幻術士立方週期效果＋幻術精通幻象
     if(!player.dead) pledgeBlessTick();   // 生命的祝福：場上血盟怪物持續治療
     // HoT 持續回復（體力回復術 / 生命的祝福）
 // 💤 【休眠機制】團隊 HoT（持續回復）：整條鏈路目前不可達——DB.skills 內已無任何技能宣告 hot/autoBuff
@@ -905,6 +905,7 @@ function tick() {
                 try { if (typeof petsOutList === 'function') petsOutList().forEach(p => { if (p && !p._downed && (p.hp || 0) > 0) p.hp = Math.min(p.mhp || 1, (p.hp || 0) + heal); }); } catch (e) {}   // 🩹 v3.2.67 團隊 HoT 也回復出戰寵物
                 try { if (typeof summonV2List === 'function') summonV2List().forEach(s => { if (s && !s._downed && (s.hp || 0) > 0) s.hp = Math.min(s.mhp || 1, (s.hp || 0) + heal); }); } catch (e) {}   // 🩹 v3.2.67 團隊 HoT 也回復召喚物
                 try { if (typeof mercSummonList === 'function') mercSummonList().forEach(s => { if (s && !s._downed && (s.hp || 0) > 0) s.hp = Math.min(s.mhp || 1, (s.hp || 0) + heal); }); } catch (e) {}   // 🩹 v3.4.71 團隊 HoT 也回復傭兵召喚物
+                try { if (typeof guardAliveList === 'function') guardAliveList().forEach(g => { if (g && !g._downed && (g.hp || 0) > 0) g.hp = Math.min(g.mhp || 1, (g.hp || 0) + heal); }); } catch (e) {}   // 🛡️ v3.8.4 團隊 HoT 也回復城堡護衛
                 _h.ticksLeft--;
                 logCombat(`${_h.skName} 為全隊回復了 ${heal} 點 HP。${_h.msg || ''}`, 'heal');
                 if(_h.ticksLeft <= 0) { delete player.hots[_hsk]; logCombat(`${_h.skName} 的持續回復效果結束。`, 'heal'); }
@@ -1110,6 +1111,7 @@ function pvpAlignmentInUse(name) {
     let same = rec => rec && String(rec.n || '').slice(0, 24) === key;
     if (Array.isArray(player.trollPlayers) && player.trollPlayers.some(same)) return true;
     if (Array.isArray(player.pvpRevengeList) && player.pvpRevengeList.some(same)) return true;
+    if (Array.isArray(player.socialNpcContacts) && player.socialNpcContacts.some(same)) return true;
     let now = Date.now();
     return Array.isArray(player.pvpKillWhispers) && player.pvpKillWhispers.some(rec =>
         same(rec) && (!!rec.awaitingRevenge || Math.max(0, Number(rec.expiresAt) || 0) > now)
@@ -1148,6 +1150,7 @@ function pvpSetNpcAlignment(name, align, clanId) {
     };
     if (Array.isArray(player.trollPlayers)) player.trollPlayers.forEach(sync);
     if (Array.isArray(player.pvpRevengeList)) player.pvpRevengeList.forEach(sync);
+    if (Array.isArray(player.socialNpcContacts)) player.socialNpcContacts.forEach(sync);
     if (Array.isArray(player.pvpKillWhispers)) player.pvpKillWhispers.forEach(sync);
     try {
         if (typeof mapState !== 'undefined' && mapState && Array.isArray(mapState.mobs)) {
@@ -1214,6 +1217,42 @@ function pvpEnsureState() {
     });
     if (Array.isArray(player.trollPlayers)) player.trollPlayers.forEach(rec => {
         if (rec && rec.n) rec.alignmentValue = pvpLockAlignment(rec.n, rec.alignmentValue, rec.clanId);
+    });
+    let socialByName = Object.create(null);
+    (Array.isArray(player.socialNpcContacts) ? player.socialNpcContacts : []).forEach(raw => {
+        if (!raw || !raw.n) return;
+        let name = String(raw.n).trim().slice(0, 24);
+        if (!name) return;
+        let messages = (Array.isArray(raw.privateMessages) ? raw.privateMessages : []).slice(-12).map(entry => ({
+            role:entry && entry.role === 'player' ? 'player' : (entry && entry.role === 'system' ? 'system' : 'npc'),
+            text:String(entry && entry.text || '').trim().slice(0, 240),
+            at:Math.max(0, Math.floor(Number(entry && entry.at) || 0))
+        })).filter(entry => entry.text);
+        let rec = {
+            n:name,
+            persona:['helpful', 'veteran', 'sarcastic', 'newbie', 'trader'].includes(raw.persona) ? raw.persona : 'helpful',
+            cls:(typeof CLAN_CLASS_NAMES === 'object' && CLAN_CLASS_NAMES[raw.cls]) ? raw.cls : 'knight',
+            avatar:TROLL_CLASS_BY_AVATAR[raw.avatar] ? raw.avatar : '男戰士',
+            alignmentValue:pvpClampAlignment(raw.alignmentValue),
+            levelOffset:Number.isFinite(Number(raw.levelOffset)) ? pvpClampLevelOffset(raw.levelOffset) : 0,
+            clanId:raw.clanId == null ? null : String(raw.clanId).slice(0, 64),
+            clanName:String(raw.clanName || '').trim().slice(0, 20),
+            clanLeader:!!raw.clanLeader,
+            blocked:!!raw.blocked,
+            privateHatred:Math.max(0, Math.min(100, Math.round(Number(raw.privateHatred) || 0))),
+            privateMessages:messages,
+            privateImpactTexts:(Array.isArray(raw.privateImpactTexts) ? raw.privateImpactTexts : []).map(s => String(s || '').slice(0, 120)).filter(Boolean).slice(-12),
+            privateImpactTimes:(Array.isArray(raw.privateImpactTimes) ? raw.privateImpactTimes : []).map(Number).filter(Number.isFinite).slice(-6),
+            lastChatAt:Math.max(0, Math.floor(Number(raw.lastChatAt) || 0))
+        };
+        if (!socialByName[name] || rec.lastChatAt >= socialByName[name].lastChatAt) socialByName[name] = rec;
+    });
+    player.socialNpcContacts = Object.keys(socialByName)
+        .map(name => socialByName[name])
+        .sort((a, b) => b.lastChatAt - a.lastChatAt)
+        .slice(0, 20);
+    player.socialNpcContacts.forEach(rec => {
+        rec.alignmentValue = pvpLockAlignment(rec.n, rec.alignmentValue, rec.clanId);
     });
     let whisperByName = Object.create(null);
     (Array.isArray(player.pvpKillWhispers) ? player.pvpKillWhispers : []).forEach(raw => {
@@ -1289,6 +1328,7 @@ function pvpChangeAlignment(delta) {
     if (!player || !player.cls || !delta) return 0;
     let before = pvpClampAlignment(player.alignmentValue);
     player.alignmentValue = pvpClampAlignment(before + delta);
+    if (typeof alliesChangeAlignment === 'function') alliesChangeAlignment(delta);
     return player.alignmentValue - before;
 }
 function _pvpNameRand(rand) {

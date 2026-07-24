@@ -500,6 +500,11 @@ async function exportSave(slot){
         let _obj = JSON.parse(data);
         if(!_obj || typeof _obj !== 'object' || !_obj.p || typeof _obj.p !== 'object') throw new Error('invalid player save');
         let _p = _obj.p;
+        // 🐉 傭兵通關日記在角色外部小鍵，匯出任意存檔位時同步回角色欄位，確保跨機匯入後仍保留今日次數。
+        if(typeof antharasRoleRef === 'function' && typeof antharasRoleClearDay === 'function'){
+            let _antRef = antharasRoleRef(_p, slotNo);
+            if(_antRef) _p.antharasClearDay = Math.max(Number(_p.antharasClearDay) || 0, antharasRoleClearDay(_antRef));
+        }
         _obj.p.allies = [];   // 🤝 傭兵引用其他存檔位；單角色備份一律不攜帶，避免幽靈傭兵
         let _whRaw = _lzGet(whKey(_p));   // 🎮 指定角色（經典/非經典）對應的倉庫（💾 解壓成明文）
         let _wh = (_whRaw == null) ? { items: [], gold: 0 } : JSON.parse(_whRaw);
@@ -958,6 +963,7 @@ function loadDeleteSelected(){
     if(fp && !_roleMarkDeleted(fp)){ alert('無法建立刪除保護，為避免舊分頁寫回角色，本次刪除已取消。'); return; }
     try { if(typeof petReleaseSlotAssignments === 'function') petReleaseSlotAssignments(slot); } catch(e){ console.warn('pet delete cleanup', e); }
     try { if(typeof mercLedgerPurgeSlot === 'function') mercLedgerPurgeSlot(slot); } catch(e){ console.warn('merc delete cleanup', e); }
+    try { if(typeof antharasForgetRoleClear === 'function') antharasForgetRoleClear(oldPlayer, slot); } catch(e){ console.warn('antharas clear cleanup', e); }
     _lsRemove('lineage_idle_save_' + slot);
     _lsRemove('lineage_idle_save_' + slot + '_bak');
     if(_lsGet('lineage_idle_save_' + slot)){ alert('角色存檔刪除失敗，請重新整理後再試。'); return; }
@@ -1096,6 +1102,8 @@ function showCreation() {
     if(main) main.classList.add('hidden');
     if(load) load.classList.add('hidden');
     if(creation) creation.classList.remove('hidden');
+    const classicToggle = document.getElementById('create-classic-toggle');
+    if(classicToggle) classicToggle.checked = false;   // 刪角後同頁重創時不得沿用上一輪的經典模式勾選
 
     creationSelectedClassBase = 'royal';
     creationSelectedGender = 'm';
@@ -1416,6 +1424,7 @@ function normalizeFacingRefsForSave() {
         else if(m._faceTgt._slot != null) m._facePartyKey = 'A:' + String(m._faceTgt._slot);
         delete m._faceTgt;
     });
+    if (typeof stripThreatForSave === 'function') stripThreatForSave();   // 🎯 v3.7.97 仇恨制：mob._threat/_threatT 是 runtime 狀態·不入檔（也避免進 SIG1 簽章）
 }
 function saveStateJson() {
     normalizeFacingRefsForSave();
@@ -1425,8 +1434,33 @@ function saveStateJson() {
     //   避免舊怪名殘留在存檔造成讀檔 null-deref，也避免每次讀檔誤報「契約到期」＋存檔肥大。
     let _sv2 = player.summonsV2;
     if (_sv2 && _sv2.length) player.summonsV2 = [];
+    let _gv2 = player.guardsV2;   // 🏰 城堡護衛實體同召喚：戰鬥暫存不入檔（名冊在血盟共用狀態·讀檔後 castleGuardSync 依名冊重建）
+    if (_gv2 && _gv2.length) player.guardsV2 = [];
     try { return JSON.stringify({ v: SAVE_VERSION, p: player, ms: mapState, ticks: state.ticks }); }
-    finally { if (_sv2 && _sv2.length) player.summonsV2 = _sv2; }
+    finally { if (_sv2 && _sv2.length) player.summonsV2 = _sv2; if (_gv2 && _gv2.length) player.guardsV2 = _gv2; }
+}
+// 🤝 v3.8.2 受僱中角色「經驗只增不減」防護（用戶指定）：擔任傭兵的角色被鎖在安全區、無法自行掛機打怪，
+//    其存檔經驗的唯一來源＝待領帳本領取（additive）。若另一情境（別分頁／先前一次領取）已把「磁碟上的」
+//    經驗墊高，本情境用較舊的記憶體快照存回會覆蓋掉墊高的經驗＝待領經驗遺失。對策：存檔序列化前，
+//    若「目前正擔任傭兵（mercRoleSafeAreaOnly·2 秒快取）」且磁碟等級/經驗高於記憶體 → 吸收磁碟較高值，
+//    保證存回只增不減（不以舊經驗覆蓋主玩家攜帶存回的經驗）。非受僱角色不受影響（閘門快取 false 直接早退）。
+function _mercMonotonicExpGuard() {
+    try {
+        if (typeof mercRoleSafeAreaOnly !== 'function' || !mercRoleSafeAreaOnly()) return;   // 只在「受僱中·被鎖安全區·無法外掛」時啟用
+        if (!player || !player.cls || typeof currentSlot === 'undefined' || currentSlot == null) return;
+        let stored = _saveUnwrap(_lzGet('lineage_idle_save_' + currentSlot));
+        if (stored.signed && !stored.ok) return;                                  // 磁碟簽章壞 → 不冒險比對
+        let raw = stored.payload; if (!raw) return;
+        let dp = JSON.parse(raw).p; if (!dp || dp.cls !== player.cls) return;      // 不同職業＝別的角色（同位重創）→ 不吸收
+        if (player.enSeed && dp.enSeed && player.enSeed !== dp.enSeed) return;     // enSeed 不符＝別的角色 → 不吸收
+        let dLv = Math.floor(dp.lv || 1), dExp = Math.floor(dp.exp || 0);
+        let mLv = Math.floor(player.lv || 1), mExp = Math.floor(player.exp || 0);
+        if (!((dLv > mLv) || (dLv === mLv && dExp > mExp))) return;                // 磁碟不比記憶體高 → 照常存回（含記憶體剛領取到的較高值）
+        player.lv = dLv; player.exp = dExp;
+        if (typeof dp.bonus === 'number') player.bonus = Math.max(Math.floor(player.bonus || 0), Math.floor(dp.bonus));   // 配點點數不倒退
+        if (dLv !== mLv && typeof calcStats === 'function') { try { calcStats(); } catch (e) {} }   // 升級 → 重算 HP/MP 上限
+        try { logSys(`<span class="text-emerald-300">受僱中偵測到存檔經驗較新（Lv.${dLv}），已保留較高進度、不以舊經驗覆蓋。</span>`); } catch (e) {}
+    } catch (e) {}
 }
 function saveGame() {
     // 死亡狀態不寫檔：避免把 player.dead=true 存進去，導致下次讀檔卡在死亡狀態而不出怪。
@@ -1484,6 +1518,7 @@ function saveGame() {
     });
     }   // ← _uiConfigReady 閘（審計#1）
 
+    _mercMonotonicExpGuard();   // 🤝 v3.8.2 受僱中經驗只增不減：序列化前吸收磁碟較高的等級/經驗，防舊快照覆蓋待領帳本領取的經驗
     if(!_lzSet('lineage_idle_save_' + currentSlot, _saveWrap(saveStateJson()))) throw new Error('persistent storage write failed');   // 🔧 寫入成功才回報；並由 saveStateJson 排除戰鬥面向暫存參照
     if(typeof petRosterSave === 'function' && !petRosterSave()) throw new Error('pet roster write failed');
     logSys(`遊戲進度已儲存。`);
@@ -1565,6 +1600,7 @@ function purgeOrphanItems() {
 
 function loadGame() {
     _uiConfigReady = false;   // 🛡️ 審計#1：載入期間 DOM 仍是上一個畫面/預設值，禁止 saveGame 以它重建 config
+    let _masteryRepair = null;
     // 🐾 v3.3.16 換角色前：先把上一角色未存的寵物進度 flush 進共用桶，再失效記憶體快取→新角色 petRoster() 從桶重載（防跨角色髒鏡像互洗裝備/出戰）。
     try { if (typeof _petRosterDirty !== 'undefined' && _petRosterDirty && player && player.cls && typeof petRosterSave === 'function') petRosterSave(); } catch (e) {}
     try { if (typeof _petRosterKey !== 'undefined') _petRosterKey = null; } catch (e) {}
@@ -1644,6 +1680,8 @@ function loadGame() {
         if(player.charmed === undefined) player.charmed = null;   // 相容舊存檔：迷魅獨立槽位
         if(player.summon && ['sk_zombie', 'sk_elf_summon', 'sk_elf_summon2'].includes(player.summon.skId)) player.summon = null;   // 🧟 v3.2.21 造屍術/屬性精靈改走 v2 實體制：清除舊管線殘留（勾選仍在→v2 自動重新召喚）
         player.summonsV2 = [];   // 🧙 v3.2.40 稽核修：v2 召喚實體不入檔（本行清 v3.2.39 以前舊檔殘留·防改名 null-deref）·勾選仍在→自動重施
+        player.guardsV2 = [];    // 🏰 城堡護衛實體不入檔（讀檔後 castleGuardSync 依血盟名冊重建）
+        if (player.castleGuard !== undefined) delete player.castleGuard;   // 🏰 v3.7.96 舊「承擔傷害的城堡護衛」已移除→清掉舊存檔殘留欄位
         if(player.summon && typeof refreshSummonBalance === 'function') refreshSummonBalance(player.summon, player);   // 召喚平衡改版：既有存檔中的召喚物同步新階級倍率、穿透與技能間隔
         if(!player.summon && player.buffs) {
             (player.skills || []).forEach(s => { if(DB.skills[s] && DB.skills[s].summon) player.buffs[s] = 0; });
@@ -1757,6 +1795,7 @@ function loadGame() {
         // 🔧 架構#6：集中式預設值合併（放在所有「轉換型」遷移之後，作為缺漏欄位的統一保底）。
         // 日後新增欄位只需登錄於 SAVE_DEFAULTS；上方逐項 if(undefined) 為歷史遷移，不必再增列。
         applySaveDefaults(player);
+        if (typeof repairMasteryState === 'function') _masteryRepair = repairMasteryState(player);
         if (!player.siege || typeof player.siege !== 'object') player.siege = {};
         if (player.ismaelAccUsed && !(player.siege.accCdUntil > 0)) player.siege.accCdUntil = Date.now() + 24 * 3600 * 1000;
         delete player.ismaelAccUsed;   // 舊版「攻城獲勝重置額度」遷移為購買後 24 小時冷卻。
@@ -1865,6 +1904,14 @@ function loadGame() {
         // 計時器統一由 startGameTimers() 註冊（內含去重），含每 5 分鐘自動存檔。
         startGameTimers();
         logSys(`===== 歡迎回來 =====`);
+        if (_masteryRepair && _masteryRepair.reset) {
+            if (_masteryRepair.reason === 'class-mismatch') {
+                logSys('<span class="text-amber-300 font-bold">已修復舊版刪角殘留的跨職業精通資料；此角色可重新向威頓村的漢接取精通任務。</span>');
+            } else if (_masteryRepair.reason === 'classic-mode') {
+                logSys('<span class="text-slate-400">已清除經典模式角色中不應存在的舊精通資料。</span>');
+            }
+        }
+        if (_masteryRepair && _masteryRepair.changed) saveGame();   // 修復後立即固化，避免重載時再次遇到同一壞狀態
         try { if (typeof purgeReplacedAllies === 'function') purgeReplacedAllies(); } catch (e) {}   // 🤝 v3.4.23 載入後掃描：出戰傭兵的來源存檔位若已換成新角色（enSeed 不同）→ 自動解散
     }
 }

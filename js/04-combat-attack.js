@@ -1246,7 +1246,6 @@ function _enemyPhysicalAttackInner(mob, idx, stunChance = 0, atkDmg = null, atkD
 
         totalDmg = Math.floor(totalDmg * mobRageDmgMult(mob));   // 🔥 HP<門檻：一般攻擊／連擊最終傷害倍率
         totalDmg = Math.max(1, totalDmg);
-        totalDmg = castleGuardAbsorb(totalDmg, 'phys');   // 🏰 肯特城護衛：承擔 10% 一般攻擊
         totalDmg = Math.floor(totalDmg * riftDamageMult());   // 🌀 時空裂痕 30 分後每分鐘 +20% 怪物攻擊力
         totalDmg = Math.max(0, Math.floor(totalDmg * raceDrMult(player, mob)));   // 🏺 v3.7.52 隨從的護身斗篷：受拉斯塔巴德敵人傷害 -20%（物理）
         totalDmg = Math.max(0, Math.floor(totalDmg * antHelperDrMult()));   // 🐉 v3.7.57 助戰者「護衛」減免（物理）
@@ -1407,26 +1406,33 @@ function enemyAttackChooseVictim(mob, idx) {
     let pets = (typeof petsOutList === 'function') ? petsOutList().filter(p => p && !p._downed && (p.hp || 0) > 0) : [];
     // 🧙 v3.2.21 召喚物 v2 加入受害者池（可被打死→全滅自動重施）：權重見下方 _sumW——v3.2.81 召喚術/造屍術＝4·屬性精靈＝3（原全 3）
     let sums = (typeof summonV2List === 'function') ? summonV2List().filter(s => s && !s._downed && (s.hp || 0) > 0) : [];
+    if (typeof necroSkeletonList === 'function') sums = sums.concat(necroSkeletonList().filter(s => s && !s._downed && (s.hp || 0) > 0));   // 🏺 v3.8.12 骷髏復生實體
     if (typeof mercSummonList === 'function') sums = sums.concat(mercSummonList());   // 🧱 v3.4.50 傭兵召喚物（無 sprite·有血量）也入受害者池·受擊走同一 enemyAttackSummon
-    if (!allies.length && !pets.length && !sums.length && !_hasAggroHide(player)) { enemyPhysicalAttack(mob, idx); return; }   // 無傭兵無寵物無召喚且玩家未裝孵育巢：照舊打玩家（快速路徑）
+    let guards = (typeof guardAliveList === 'function') ? guardAliveList() : [];   // 🏰 城堡護衛加入受害者池（可被打→30 秒自動復活）
+    if (!allies.length && !pets.length && !sums.length && !guards.length && !_hasAggroHide(player)) { enemyPhysicalAttack(mob, idx); return; }   // 無傭兵無寵物無召喚無護衛且玩家未裝孵育巢：照舊打玩家（快速路徑）
     let pool = aggroVictimPool(allies);   // 🏺 聖甲蟲的孵育巢：未裝備者優先被指定攻擊（寵物無裝備·不參與孵育巢過濾）
     allies = pool.allies;
-    let _petW = petAggroWeight, _sumW = summonAggroWeight;   // 🐾🧙 v3.2.82 改用模組共用權重（含四寵覆寫·與魔法受害者池一致）
-    let pw = pool.playerIn ? mercAggroWeight(player) : 0;
-    let total = pw; for (let a of allies) total += mercAggroWeight(a);
-    for (let p of pets) total += _petW(p);
-    for (let s of sums) total += _sumW(s);
+    let _petW = petAggroWeight, _sumW = summonAggroWeight, _gW = (typeof guardAggroWeight === 'function') ? guardAggroWeight : (() => 4);   // 🐾🧙🏰 v3.2.82 模組共用權重
+    // 🎯 v3.7.97 仇恨制：選敵權重＝baseThreat×K + 累積仇恨（累積恆 0 時＝舊靜態權重比例·零風險回退）。base 仍走上面各 aggroWeight。
+    let _tw = (typeof victimThreatWeight === 'function') ? victimThreatWeight : (m, e, b) => b;
+    let pw = pool.playerIn ? _tw(mob, player, mercAggroWeight(player)) : 0;
+    let total = pw; for (let a of allies) total += _tw(mob, a, mercAggroWeight(a));
+    for (let p of pets) total += _tw(mob, p, _petW(p));
+    for (let s of sums) total += _tw(mob, s, _sumW(s));
+    for (let g of guards) total += _tw(mob, g, _gW(g));
     if (total <= 0) { enemyPhysicalAttack(mob, idx); return; }
     let r = Math.random() * total;
     r -= pw;
     if (r < 0) { enemyPhysicalAttack(mob, idx); return; }   // 抽中玩家
-    for (let a of allies) { r -= mercAggroWeight(a); if (r < 0) { enemyAttackAlly(mob, a); return; } }
-    for (let p of pets) { r -= _petW(p); if (r < 0) { if (typeof enemyAttackPet === 'function') enemyAttackPet(mob, p); else enemyPhysicalAttack(mob, idx); return; } }
-    for (let s of sums) { r -= _sumW(s); if (r < 0) { if (typeof enemyAttackSummon === 'function') enemyAttackSummon(mob, s); else enemyPhysicalAttack(mob, idx); return; } }
+    for (let a of allies) { r -= _tw(mob, a, mercAggroWeight(a)); if (r < 0) { enemyAttackAlly(mob, a); return; } }
+    for (let p of pets) { r -= _tw(mob, p, _petW(p)); if (r < 0) { if (typeof enemyAttackPet === 'function') enemyAttackPet(mob, p); else enemyPhysicalAttack(mob, idx); return; } }
+    for (let s of sums) { r -= _tw(mob, s, _sumW(s)); if (r < 0) { if (typeof enemyAttackSummon === 'function') enemyAttackSummon(mob, s); else enemyPhysicalAttack(mob, idx); return; } }
+    for (let g of guards) { r -= _tw(mob, g, _gW(g)); if (r < 0) { if (typeof enemyAttackGuard === 'function') enemyAttackGuard(mob, g); else enemyPhysicalAttack(mob, idx); return; } }
     // Floating-point fallback must respect aggro hiding and keep pets in the candidate pool.
     if (pool.playerIn) enemyPhysicalAttack(mob, idx);
     else if (allies.length) enemyAttackAlly(mob, allies[allies.length - 1]);
     else if (pets.length && typeof enemyAttackPet === 'function') enemyAttackPet(mob, pets[pets.length - 1]);
+    else if (sums.length && typeof enemyAttackSummon === 'function') enemyAttackSummon(mob, sums[sums.length - 1]);
     else enemyPhysicalAttack(mob, idx);
 }
 
@@ -1453,8 +1459,16 @@ function teamIlluAura(forWho, forMinion) {
         let r = (DB.skills.sk_royal_burnweapon && DB.skills.sk_royal_burnweapon.d) || {};
         royalEd = r.extraDmg || 0; ed += royalEd; eh += r.extraHit || 0;
     }
-    if (ed === 0 && eh === 0 && md === 0) return null;
-    return { ed: ed, eh: eh, md: md, royalEd: royalEd };
+    // 🔥 v3.8.3 舞躍之火（團隊光環）：任一隊員維持 → 全隊「近距離傷害 +3」＝玩家／傭兵／寵物／召喚物／城堡護衛。
+    //    受益者自身持有時其 meleeDmg 已由 recomputeStats 的 buff 迴圈算進自身 d → 此處不補（避免雙算），比照上方灼熱武器。
+    //    寵物/召喚/護衛沒有 .buffs 也沒有 d.meleeDmg → 一律取得光環，由各自傷害式直接加 mel。
+    let mel = 0;
+    if (!(forWho && forWho.buffs && (forWho.buffs.sk_elf_dancefire || 0) > 0) && _teamAuraHas('sk_elf_dancefire', forWho)) {
+        let f = (DB.skills.sk_elf_dancefire && DB.skills.sk_elf_dancefire.d) || {};
+        mel = f.meleeDmg || 0;
+    }
+    if (ed === 0 && eh === 0 && md === 0 && mel === 0) return null;
+    return { ed: ed, eh: eh, md: md, mel: mel, royalEd: royalEd };
 }
 function enemyAttackAlly(mob, ally) {
     if (!ally) return;
@@ -1669,6 +1683,7 @@ function killPlayer() {
     player.buffs.sk_charm = 0;
     // 🧙 v3.2.39 稽核修：v2 召喚實體也在死亡當下消散（summonV2Tick 被 !player.dead 閘住，死亡期間跑不到它的清理分支）
     if (player.summonsV2 && player.summonsV2.length) { player.summonsV2 = []; try { if (typeof renderSummonPanel === 'function') renderSummonPanel(true); } catch (e) {} }
+    if (typeof necroDismissAll === 'function') necroDismissAll();   // 🏺 v3.8.12 骷髏復生實體同樣於玩家死亡時全數消散
     // 協力傭兵：死亡當下不解散；改由「祈求復活回城」時解散（原地復活/返生術/復活卷軸則保留）
     player.skills.forEach(s => { if(DB.skills[s] && DB.skills[s].summon) player.buffs[s] = 0; });
     // 🔮 幻術士：死亡時一併清除立方/幻象/化身/疼痛等增益（與召喚一致；復活後由自動施放重新展開）
@@ -1794,31 +1809,40 @@ function castMobMagic(mob, sk) {
     let allies = (player.allies || []).filter(a => a && !a._downed && (a.curHp || 0) > 0);
     let pets = (typeof petsOutList === 'function') ? petsOutList().filter(p => p && !p._downed && (p.hp || 0) > 0) : [];
     let sums = (typeof summonV2List === 'function') ? summonV2List().filter(s => s && !s._downed && (s.hp || 0) > 0) : [];   // 🧙 v3.2.82 召喚物加入魔法受害者池
+    if (typeof necroSkeletonList === 'function') sums = sums.concat(necroSkeletonList().filter(s => s && !s._downed && (s.hp || 0) > 0));   // 🏺 v3.8.12 骷髏復生實體
     if (typeof mercSummonList === 'function') sums = sums.concat(mercSummonList());   // 🧱 v3.4.50 傭兵召喚物也入魔法受害者池（AOE 波及＋傷害型單體加權·applyMobMagicToSummon 通用）
+    let guards = (typeof guardAliveList === 'function') ? guardAliveList() : [];   // 🏰 城堡護衛（同召喚物：純 CC/DoT 對其無效·僅傷害型單體加權·全體型一律波及）
     let petWeight = petAggroWeight;   // 🐾 v3.2.82 共用模組權重（含四寵覆寫）
+    let _gW = (typeof guardAggroWeight === 'function') ? guardAggroWeight : (() => 4);
     let sumIn = !!sk.dmg && sums.length;   // 🧙 v3.2.82 召喚物僅「傷害型魔法」納入單體加權池（召喚物無狀態系統→純 CC/DoT 不重導向·以免免疫怪魔法變成召喚物 CC 海綿）；全體型一律波及（AOE 分支·純狀態對其自然無效）
-    if ((typeof MOB_PARTY_AOE_SKILLS !== 'undefined') && MOB_PARTY_AOE_SKILLS.has(sk.skn)) {   // 全體：玩家＋全部非倒地傭兵/寵物/召喚物
+    let guardIn = !!sk.dmg && guards.length;   // 🏰 護衛同上（無狀態系統）
+    if ((typeof MOB_PARTY_AOE_SKILLS !== 'undefined') && MOB_PARTY_AOE_SKILLS.has(sk.skn)) {   // 全體：玩家＋全部非倒地傭兵/寵物/召喚物/護衛
         if (!player.dead) applyMobMagic(mob, sk);
         for (let a of allies) { if (mob.curHp <= 0) break; applyMobMagicToAlly(mob, sk, a); }
         for (let p of pets) { if (mob.curHp <= 0) break; if (typeof applyMobMagicToPet === 'function') applyMobMagicToPet(mob, sk, p); }
         for (let s of sums) { if (mob.curHp <= 0) break; if (typeof applyMobMagicToSummon === 'function') applyMobMagicToSummon(mob, sk, s); }   // 🧙 v3.2.82 全體魔法波及召喚物（只吃傷害·純狀態內部略過）
+        for (let g of guards) { if (mob.curHp <= 0) break; if (typeof applyMobMagicToGuard === 'function') applyMobMagicToGuard(mob, sk, g); }   // 🏰 全體魔法波及護衛
         return;
     }
-    if (!allies.length && !pets.length && !sumIn) { applyMobMagic(mob, sk); return; }
+    if (!allies.length && !pets.length && !sumIn && !guardIn) { applyMobMagic(mob, sk); return; }
     let pool = aggroVictimPool(allies);   // 🏺 聖甲蟲的孵育巢：單體指定魔法同樣「未裝備者優先」（全體魔法走上方 AOE 分支不受影響）
     allies = pool.allies;
-    let pw = pool.playerIn ? mercAggroWeight(player) : 0, total = pw; for (let a of allies) total += mercAggroWeight(a);
-    for (let p of pets) total += petWeight(p);
-    if (sumIn) for (let s of sums) total += summonAggroWeight(s);   // 🧙 v3.2.82 傷害型魔法：召喚物入池
+    let _tw = (typeof victimThreatWeight === 'function') ? victimThreatWeight : (m, e, b) => b;   // 🎯 v3.7.97 仇恨制：單體魔法選敵同走 base×K+累積
+    let pw = pool.playerIn ? _tw(mob, player, mercAggroWeight(player)) : 0, total = pw; for (let a of allies) total += _tw(mob, a, mercAggroWeight(a));
+    for (let p of pets) total += _tw(mob, p, petWeight(p));
+    if (sumIn) for (let s of sums) total += _tw(mob, s, summonAggroWeight(s));   // 🧙 v3.2.82 傷害型魔法：召喚物入池
+    if (guardIn) for (let g of guards) total += _tw(mob, g, _gW(g));   // 🏰 傷害型魔法：護衛入池
     if (total <= 0) { applyMobMagic(mob, sk); return; }
     let r = Math.random() * total; r -= pw;
     if (r < 0) { applyMobMagic(mob, sk); return; }
-    for (let a of allies) { r -= mercAggroWeight(a); if (r < 0) { applyMobMagicToAlly(mob, sk, a); return; } }
-    for (let p of pets) { r -= petWeight(p); if (r < 0) { if (typeof applyMobMagicToPet === 'function') applyMobMagicToPet(mob, sk, p); return; } }
-    if (sumIn) for (let s of sums) { r -= summonAggroWeight(s); if (r < 0) { if (typeof applyMobMagicToSummon === 'function') applyMobMagicToSummon(mob, sk, s); return; } }   // 🧙 v3.2.82
+    for (let a of allies) { r -= _tw(mob, a, mercAggroWeight(a)); if (r < 0) { applyMobMagicToAlly(mob, sk, a); return; } }
+    for (let p of pets) { r -= _tw(mob, p, petWeight(p)); if (r < 0) { if (typeof applyMobMagicToPet === 'function') applyMobMagicToPet(mob, sk, p); return; } }
+    if (sumIn) for (let s of sums) { r -= _tw(mob, s, summonAggroWeight(s)); if (r < 0) { if (typeof applyMobMagicToSummon === 'function') applyMobMagicToSummon(mob, sk, s); return; } }   // 🧙 v3.2.82
+    if (guardIn) for (let g of guards) { r -= _tw(mob, g, _gW(g)); if (r < 0) { if (typeof applyMobMagicToGuard === 'function') applyMobMagicToGuard(mob, sk, g); return; } }   // 🏰 護衛
     if (pool.playerIn) applyMobMagic(mob, sk);
     else if (allies.length) applyMobMagicToAlly(mob, sk, allies[allies.length - 1]);
     else if (pets.length && typeof applyMobMagicToPet === 'function') applyMobMagicToPet(mob, sk, pets[pets.length - 1]);
+    else if (sumIn && sums.length && typeof applyMobMagicToSummon === 'function') applyMobMagicToSummon(mob, sk, sums[sums.length - 1]);
     else applyMobMagic(mob, sk);
 }
 // 🏺 statusHealHp（牛鬼之子的黑戒·傭兵鏡像）：與玩家 _playerStatusSnap/_statusInflictHeal 同型——
@@ -2376,7 +2400,6 @@ function _applyMobMagicInner(mob, sk) {
           dmg = Math.floor(dmg * _drMult); }
         dmg = Math.floor(dmg * mobRageDmgMult(mob));   // 🔥 HP<門檻：技能傷害倍率
         dmg = Math.max(1, dmg);
-        dmg = castleGuardAbsorb(dmg, 'magic');   // 🏰 風木城護衛：承擔 10% 魔法攻擊
         dmg = Math.floor(dmg * riftDamageMult());   // 🌀 時空裂痕 30 分後每分鐘 +20% 怪物技能傷害
 
         dmg = Math.max(0, Math.floor(dmg * raceDrMult(player, mob)));   // 🏺 v3.7.52 隨從的護身斗篷：受拉斯塔巴德敵人傷害 -20%（魔法·固定傷害亦適用）
@@ -2522,13 +2545,16 @@ function rollPledgeDropEnhance(safe) {
 
 // 野外+血盟敵人擊殺掉寶：1% 機率獲得 1 件物品（抽法同潘朵拉黑市權重 getWeightedGachaResult；詞綴走新制——只可能獲得「祝福的」1%，屬性/遠古改由象牙塔『碧恩』取得；仍依安定值附帶強化等級）
 function pledgeBonusDrop(mob, rate) {
-    if (typeof isSiegeArea === 'function' && isSiegeArea(mapState.current)) return;   // 🏰 攻城區敵人／玩家NPC死亡一律不掉攜帶物
-    let _pledgeDropRate = (rate || 0.01) * classicDropMult();
-    if (typeof partyDropRate === 'function') _pledgeDropRate = partyDropRate(_pledgeDropRate);
-    if (Math.random() >= _pledgeDropRate) return;   // 預設 1%；有效隊伍人數使機率最高 ×8
+    let _privateChatGift = !!(mob && mob._privateChatGift);
+    if (!_privateChatGift && typeof isSiegeArea === 'function' && isSiegeArea(mapState.current)) return null;   // 🏰 攻城區敵人／玩家NPC死亡一律不掉攜帶物；私訊送禮不屬於戰鬥掉落
+    if (!_privateChatGift) {
+        let _pledgeDropRate = (rate || 0.01) * classicDropMult();
+        if (typeof partyDropRate === 'function') _pledgeDropRate = partyDropRate(_pledgeDropRate);
+        if (Math.random() >= _pledgeDropRate) return null;   // 預設 1%；有效隊伍人數使機率最高 ×8
+    }
     let id = getWeightedGachaResult(true);   // 🔧 血盟野外＋攻城敵人：權重 1 以外的物品以 2 倍權重抽取（權重100→200）
     let d0 = DB.items[id];
-    if (!d0) return;
+    if (!d0) return null;
     let isEquip = ((d0.type === 'wpn' && !d0.isArrow) || d0.type === 'arm' || d0.type === 'acc') && !isRelic(d0);   // 🏺 遺物不會祝福
     let item;
     if (isEquip) {
@@ -2551,7 +2577,9 @@ function pledgeBonusDrop(mob, rate) {
     }
     let fullName = getItemFullName(item);
     let colorClass = getItemColor(item);
-    logSys(`<span class="${getMobColor(mob.lv)}">${mob.n}</span> 攜帶的 <span class="${colorClass} font-bold">${fullName}</span> 掉落了！`, (DB.items[item.id] && DB.items[item.id].relic) ? 'relic' : ((DB.items[item.id] && DB.items[item.id].legend) ? 'legend' : ''));   // 📌 v3.6.73 稀有才亮未讀點
+    if (!_privateChatGift)
+        logSys(`<span class="${getMobColor(mob.lv)}">${mob.n}</span> 攜帶的 <span class="${colorClass} font-bold">${fullName}</span> 掉落了！`, (DB.items[item.id] && DB.items[item.id].relic) ? 'relic' : ((DB.items[item.id] && DB.items[item.id].legend) ? 'legend' : ''));   // 📌 v3.6.73 稀有才亮未讀點
+    return { item:item, fullName:fullName, colorClass:colorClass };
 }
 
 // ⚖️ v3.6.16 玩家 NPC 噴裝率依「該 NPC 的性向值」決定（用戶拍板）：越邪惡（負值）掉得越多、越正義（正值）掉得越少。
@@ -2581,8 +2609,7 @@ function allRelicIds() {
 //   命中 0.001% 後，再從「全部遺物」等機率抽 1 件（非依 gachaWeight 權重──遺物權重一律 0，用權重抽會全員 0 抽不出東西）。
 function playerNpcRelicDrop(mob) {
     if (typeof isSiegeArea === 'function' && isSiegeArea(mapState.current)) return;   // 🏰 攻城區一律不掉（比照 pledgeBonusDrop 首行·防無冷卻攻城變成刷遺物場）
-    let _relicX2 = 1;   // 🐰 幸運暴走兔腳（需裝備）：遺物掉落機率 ×2（比照 js/05 怪物掉落表的遺物判定）
-    try { for (let _k in player.eq) { let _e = player.eq[_k]; if (_e && DB.items[_e.id] && DB.items[_e.id].relicDropX2) { _relicX2 = 2; break; } } } catch (e) {}
+    let _relicX2 = (typeof mainPlayerHasEquippedEffect === 'function' && mainPlayerHasEquippedEffect('relicDropX2')) ? 2 : 1;   // 幸運暴走兔腳只讀主操作玩家裝備；傭兵／寵物裝備不影響掉落率
     let _npcRelicRate = 0.00001 * _relicX2 * classicDropMult();
     if (typeof partyDropRate === 'function') _npcRelicRate = partyDropRate(_npcRelicRate);
     if (Math.random() >= _npcRelicRate) return;   // 0.001% 基礎；兔腳與有效隊伍人數倍率依序套用
